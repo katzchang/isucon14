@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OTel Audit - isuride</title>
+<style>
+:root {
+  --bg: #f5f7fa;
+  --surface: #ffffff;
+  --ink: #17202a;
+  --muted: #5f6b7a;
+  --line: #dbe2ea;
+  --accent: #1f5eff;
+  --ok: #16794c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding-bottom: 88px; }
+header { background: #121821; color: #eef2f7; padding: 28px 0; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+.eyebrow { color: #9aa8ba; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+h1 { margin: 8px 0 4px; font-size: clamp(26px, 4vw, 38px); line-height: 1.1; }
+.meta { color: #b8c2cf; display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; }
+.meta b { color: #fff; }
+.report-nav { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 14px; }
+.report-nav a { color: #91b8ff; }
+.summary { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; margin: 18px 0; padding: 16px 18px; }
+.summary h2, .panel h2 { font-size: 14px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+.decision-context { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 10px; }
+.decision-context section { border: 1px solid var(--line); border-radius: 7px; padding: 10px 11px; background: #fbfcfe; }
+.decision-context p { margin-bottom: 0; }
+.decision-table-link { color: var(--accent); text-decoration: none; }
+.decision-table-link code { color: var(--muted); font-size: 11px; }
+.decision-table-link:hover strong, .decision-table-link:focus strong { text-decoration: underline; }
+.finding-jump { display: inline-block; color: var(--accent); font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0 5px 3px 0; text-decoration: none; }
+.finding-jump:hover, .finding-jump:focus { text-decoration: underline; }
+.review-note { border-left: 3px solid var(--accent); margin: 13px 0; padding: 8px 10px; background: #f4f7ff; }
+.decision-table { overflow-x: auto; }
+.summary details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 10px; }
+.summary details > summary { cursor: pointer; font-weight: 700; color: var(--muted); }
+.impact-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; margin: 18px 0; padding: 16px 18px; overflow-x: auto; }
+.impact-panel h2 { font-size: 14px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+.impact-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.impact-stats div { border: 1px solid var(--line); border-radius: 7px; background: #fbfcfe; padding: 9px 10px; }
+.impact-stats span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.impact-stats strong { display: block; margin-top: 2px; font-size: 18px; }
+.impact-panel details > summary { cursor: pointer; font-weight: 700; margin-top: 12px; }
+.findings-section { margin: 18px 0; }
+.findings-section > h2 { color: var(--ink); font-size: 18px; margin: 0 0 12px; }
+.findings-total { color: var(--muted); font-size: 13px; font-weight: 600; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+.card.done { border-color: #9bd5b7; }
+.card.done .spine { background: var(--ok); }
+.card.working { border-color: #9bd5b7; }
+.card-head { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; }
+.row { display: grid; grid-template-columns: 5px minmax(72px, auto) minmax(0, 1fr) auto; gap: 12px; align-items: center; width: 100%; text-align: left; border: 0; background: transparent; color: inherit; padding: 13px 14px 13px 0; cursor: pointer; font: inherit; }
+.spine { align-self: stretch; background: var(--accent); }
+.fid { font: 700 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.finding-copy { min-width: 0; }
+.ftitle { display: block; font-weight: 700; }
+.fimpact { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; margin-top: 2px; }
+.finding-meta { align-items: center; color: var(--muted); display: flex; flex-wrap: wrap; font-size: 11px; font-weight: 600; gap: 4px 12px; margin-top: 5px; }
+.finding-meta strong { color: var(--ink); }
+.finding-meta code { color: var(--ink); font-size: 10px; }
+.plan-select { display: flex; gap: 7px; align-items: center; border: 1px solid var(--line); border-radius: 6px; margin-right: 14px; padding: 5px 9px; color: var(--muted); background: #fff; }
+.plan-select.on { border-color: var(--ok); color: var(--ok); background: #eef8f2; }
+.plan-select.included { border-color: #b7791f; color: #7a4a00; background: #fff8e8; }
+.plan-unavailable { max-width: 220px; margin-right: 14px; color: var(--muted); font-size: 11px; font-weight: 700; line-height: 1.3; text-align: right; }
+.decision-select { grid-column: 1 / -1; min-width: 0; border: 0; border-top: 1px solid var(--line); margin: 0; padding: 12px 14px 14px; background: #fbfcfe; }
+.decision-select legend { width: 100%; color: var(--ink); font-weight: 700; padding: 0 0 8px; }
+.decision-options { display: grid; gap: 7px; }
+.decision-option { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; align-items: start; border: 1px solid var(--line); border-radius: 6px; background: #fff; padding: 8px 10px; cursor: pointer; }
+.decision-option:has(input:checked) { border-color: var(--accent); background: #f4f7ff; }
+.decision-option input { margin-top: 3px; }
+.decision-option strong, .decision-option span { grid-column: 2; }
+.decision-option span { color: var(--muted); font-size: 12px; }
+.decision-clear { border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 11px; margin-top: 8px; padding: 0; text-decoration: underline; }
+.caret { color: var(--muted); font-size: 20px; }
+.card.open .caret { transform: rotate(90deg); }
+.body { display: none; border-top: 1px solid var(--line); background: #fbfcfe; padding: 16px 18px; }
+.card.open .body { display: block; }
+.cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.finding-technical-details { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 12px; }
+.finding-technical-details > summary { align-items: baseline; color: var(--accent); cursor: pointer; display: flex; flex-wrap: wrap; font-weight: 700; gap: 5px 10px; }
+.detail-counts { color: var(--muted); font-size: 12px; font-weight: 600; }
+.technical-details-body { margin-top: 14px; }
+.technical-details-body > section, .technical-details-body > .cols + section { margin-top: 14px; }
+@media (max-width: 760px) { .impact-stats, .decision-context { grid-template-columns: 1fr; } .card-head { grid-template-columns: 1fr; } .row { grid-template-columns: 5px auto 1fr auto; } .plan-select, .plan-unavailable { justify-self: end; margin: 0 14px 12px; width: max-content; } .decision-select { grid-column: 1; } .cols { grid-template-columns: 1fr; } }
+h3 { margin: 0 0 6px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+p { margin: 0 0 12px; }
+ul { margin: 0; padding-left: 18px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.source-link { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+.source-link:hover, .source-link:focus { text-decoration: underline; }
+.source-link code { color: inherit; }
+.source-reference { overflow-wrap: anywhere; cursor: text; user-select: all; }
+.source-open { display: inline-block; margin-left: 3px; font-size: 10px; vertical-align: top; }
+pre { background: #111827; color: #edf2f7; border-radius: 6px; padding: 10px; overflow-x: auto; white-space: pre-wrap; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border-bottom: 1px solid var(--line); padding: 7px 8px; text-align: left; vertical-align: top; }
+th { color: var(--muted); font-size: 12px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; margin: 18px 0; overflow-x: auto; }
+.panel details > summary { cursor: pointer; font-weight: 700; }
+.technical-appendix h2:not(:first-child) { margin-top: 22px; }
+.context-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.context-grid .panel { margin: 0; }
+.proof { border-left: 3px solid var(--ok); padding-left: 12px; }
+.muted { color: var(--muted); }
+.tray { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; background: #121821; color: #fff; box-shadow: 0 -8px 24px rgba(18, 24, 33, .18); }
+.tray[hidden] { display: none; }
+.tray-bar { padding-top: 12px; padding-bottom: 12px; }
+.tray-hint { display: block; color: #d3d9e2; font-size: 11px; line-height: 1.4; margin-top: 3px; }
+.tray-hint code { color: #91f0b8; }
+.tray-command { min-width: 0; }
+.instrument-command { display: block; margin-top: 4px; width: 100%; overflow-x: auto; white-space: nowrap; background: #0b111a; border: 1px solid #253143; border-radius: 6px; color: #91f0b8; padding: 7px 9px; font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 760px) {
+  body { padding-bottom: 96px; }
+  .context-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="eyebrow">OpenTelemetry audit report</div>
+    <h1>isuride</h1>
+    <div class="meta">
+      <span>audit <b>isuride-go-20261008</b></span>
+      <span>commit <b>53f8b62</b></span>
+      <span>language <b>go</b></span>
+      <span>framework <b>chi</b></span>
+      <span>date <b>2026-10-08</b></span>
+      <span><b>11</b> findings</span>
+    </div>
+    <nav class="report-nav" aria-label="Report formats">
+      <a href="otel-audit.json">Canonical audit data (JSON)</a>
+    </nav>
+  </div>
+</header>
+<main class="wrap">
+  <section class="summary">
+    <h2>Executive Summary</h2>
+    <div class="decision-context"><section><h3>Current baseline</h3><p>Source inventory: 18 routes · 0 span entries · 0 metric entries · 2 log integrations.</p></section></div><p class="review-note"><strong>Review order:</strong> findings are ordered by priority, highest first. Select executable work on its card; answer a telemetry choice only where the card asks for one.</p>
+  </section>
+
+  <section class="findings-section" aria-labelledby="findings-heading">
+    <h2 id="findings-heading" tabindex="-1">Findings <span class="findings-total">· 11</span></h2>
+    <div id="cards"></div>
+  </section>
+  <section class="panel technical-appendix"><details><summary>Technical appendix</summary>
+    <h2>Source-visible instrumentation evidence</h2><h3>Log integrations</h3><table><thead><tr><th>Log integration</th><th>Source</th><th>Detail</th></tr></thead><tbody><tr><td>slog default handler (stdout text)</td><td><a class="source-link" href="../main.go#L175" target="_blank" rel="noopener" title="Open local source file"><code>main.go:175</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>not configured: no LoggerProvider, no OTLP bridge, no trace correlation</td></tr><tr><td>chi middleware.Logger access log (stdout)</td><td><a class="source-link" href="../main.go#L69" target="_blank" rel="noopener" title="Open local source file"><code>main.go:69</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>not configured: stdout only</td></tr></tbody></table>
+    <h2>Verification plan</h2>
+    <h3>Test environments</h3><table><thead><tr><th>ID</th><th>Surface</th><th>Config evidence</th><th>Runner</th><th>Scope</th><th>Prerequisites</th></tr></thead><tbody><tr><td>go.build</td><td>isuride Go module</td><td><a class="source-link" href="../go.mod" target="_blank" rel="noopener" title="Open local source file"><code>go.mod</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>go build ./... &amp;&amp; go vet ./...</td><td>module</td><td>Go toolchain; no tests exist in repo</td></tr><tr><td>compose.bench</td><td>isuride under development/compose-go.yml with ISUCON14 benchmarker</td><td>../../development/compose-go.yml</td><td>docker compose -f development/compose-go.yml up -d --build; bench run --target http://localhost:8080 --payment-url http://host.docker.internal:12345 -t 60</td><td>full runtime</td><td>OrbStack/Docker, local OTLP receiver (Splunk Observability Studio or collector), tcp_tw_reuse sysctl on nginx/webapp</td></tr></tbody></table>
+    <h3>Acceptance scenarios</h3><table><thead><tr><th>ID</th><th>Trigger</th><th>Source entrypoint</th><th>Expected signals</th><th>Proof</th><th>Acceptance</th></tr></thead><tbody><tr><td>runtime.startup</td><td>Start the webapp container</td><td><a class="source-link" href="../main.go#L22" target="_blank" rel="noopener" title="Open local source file"><code>main.go:22</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>resource service.name=isuride on first exported batch</td><td>full runtime</td><td>First exported span/metric carries service.name and env overrides are honored</td></tr><tr><td>runtime.shutdown</td><td>Stop the webapp container (SIGTERM)</td><td><a class="source-link" href="../main.go#L25" target="_blank" rel="noopener" title="Open local source file"><code>main.go:25</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>final batch flushed</td><td>full runtime</td><td>Spans from the last requests before stop arrive</td></tr><tr><td>http.app.nearby-chairs.success</td><td>GET /api/app/nearby-chairs during bench</td><td><a class="source-link" href="../app_handlers.go#L834" target="_blank" rel="noopener" title="Open local source file"><code>app_handlers.go:834</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>server span GET /api/app/nearby-chairs with child SELECT spans</td><td>full runtime</td><td>Route-named span; repeated SELECT rides / ride_statuses / chair_locations children</td></tr><tr><td>http.app.rides-evaluation.success</td><td>POST /api/app/rides/{ride_id}/evaluation during bench</td><td><a class="source-link" href="../app_handlers.go#L508" target="_blank" rel="noopener" title="Open local source file"><code>app_handlers.go:508</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>server span with http.route pattern, DB spans, payment client span</td><td>full runtime</td><td>Span name contains {ride_id} not an actual ID; payment client span is a child</td></tr><tr><td>http.app.notification.success</td><td>GET /api/app/notification during bench</td><td><a class="source-link" href="../app_handlers.go#L661" target="_blank" rel="noopener" title="Open local source file"><code>app_handlers.go:661</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>server span with getChairStats DB fan-out</td><td>full runtime</td><td>Per-ride ride_statuses SELECT children visible</td></tr><tr><td>http.owner.chairs.success</td><td>GET /api/owner/chairs during bench</td><td><a class="source-link" href="../owner_handlers.go#L193" target="_blank" rel="noopener" title="Open local source file"><code>owner_handlers.go:193</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>server span with one heavy window-function SELECT</td><td>full runtime</td><td>Single long DB span dominates the request</td></tr><tr><td>http.auth.failure</td><td>Request an authed route without cookie</td><td><a class="source-link" href="../middlewares.go#L14" target="_blank" rel="noopener" title="Open local source file"><code>middlewares.go:14</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>server span with 401 status, not Error</td><td>either</td><td>http.response.status_code=401; span status unset</td></tr><tr><td>http.error.500</td><td>Force a DB failure (stop db container briefly) and call an authed route</td><td><a class="source-link" href="../main.go#L164" target="_blank" rel="noopener" title="Open local source file"><code>main.go:164</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>server span status Error with exception event</td><td>full runtime</td><td>exception.message present</td></tr><tr><td>db.pool.metrics</td><td>Run bench for 60s</td><td><a class="source-link" href="../main.go#L62" target="_blank" rel="noopener" title="Open local source file"><code>main.go:62</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>db.client.connection.count, db.client.connection.wait_time</td><td>full runtime</td><td>Datapoints each export interval with state dimension</td></tr><tr><td>payment.retry</td><td>Bench payment server injects failures</td><td><a class="source-link" href="../payment_gateway.go#L84" target="_blank" rel="noopener" title="Open local source file"><code>payment_gateway.go:84</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>multiple payment client spans or retry events in one trace</td><td>full runtime</td><td>Attempt number visible</td></tr><tr><td>logs.error.correlated</td><td>Trigger a 5xx</td><td><a class="source-link" href="../main.go#L175" target="_blank" rel="noopener" title="Open local source file"><code>main.go:175</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>OTLP log record with trace_id/span_id</td><td>full runtime</td><td>Exactly one OTLP record per slog call; stdout unchanged</td></tr><tr><td>internal.matching.matched</td><td>Matcher poll with waiting ride and free chair</td><td><a class="source-link" href="../internal_handlers.go#L47" target="_blank" rel="noopener" title="Open local source file"><code>internal_handlers.go:47</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>matching.outcome=matched, attempts recorded</td><td>full runtime</td><td>Counter increments with outcome=matched</td></tr><tr><td>internal.matching.no_ride</td><td>Matcher poll with no waiting ride</td><td><a class="source-link" href="../internal_handlers.go#L15" target="_blank" rel="noopener" title="Open local source file"><code>internal_handlers.go:15</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>matching.outcome=no_waiting_ride</td><td>either</td><td>Counter increments with outcome=no_waiting_ride</td></tr><tr><td>runtime.metrics</td><td>Run the service for one export interval</td><td><a class="source-link" href="../main.go#L22" target="_blank" rel="noopener" title="Open local source file"><code>main.go:22</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>go.goroutine.count, go.memory.used</td><td>full runtime</td><td>Datapoints exported</td></tr><tr><td>http.initialize.success</td><td>Bench calls POST /api/initialize</td><td><a class="source-link" href="../main.go#L123" target="_blank" rel="noopener" title="Open local source file"><code>main.go:123</code><span class="source-open" aria-hidden="true">↗</span></a></td><td>init.sh child span</td><td>full runtime</td><td>One child span with exit code 0</td></tr></tbody></table>
+    <h2>Audit notes</h2><ul><li>11 findings. The service has no OpenTelemetry code at all: no SDK, no provider, no exporter, no instrumentation package in go.mod.</li><li>Highest priority is the SDK bootstrap plus HTTP server spans named by chi route pattern and database/sql client spans; together they make per-request query fan-out (N+1) visible in a trace waterfall.</li><li>Every hot handler issues queries in loops (nearby-chairs, notification chair stats, ride history, owner sales), and the schema has no secondary indexes, so DB spans are the main diagnostic signal for this service.</li><li>The outbound payment gateway call retries up to 5 times with 100ms sleeps inside an open DB transaction; it needs client spans and retry visibility.</li><li>No route-aware chi instrumentation exists in opentelemetry-go-contrib; route names must come from chi&#x27;s RoutePattern applied onto otelhttp spans.</li><li>The internal matching endpoint (polled every 0.5s) and slog error logging are recommended follow-ups once the baseline is in place.</li></ul>
+    <h2>Audit Evidence</h2><table><thead><tr><th>Check</th><th>Finding</th><th>Source</th></tr></thead><tbody><tr><td>Manifest</td><td>Go 1.23 module; go-chi/chi/v5 v5.1.0, go-sql-driver/mysql v1.8.1, jmoiron/sqlx v1.4.0, oklog/ulid/v2. No go.opentelemetry.io dependency.</td><td><a class="source-link" href="../go.mod" target="_blank" rel="noopener" title="Open local source file"><code>go.mod</code><span class="source-open" aria-hidden="true">↗</span></a></td></tr><tr><td>Entry point</td><td>Single HTTP process; setup() opens sqlx DB and builds chi router, main() calls http.ListenAndServe(:8080) with no shutdown handling</td><td><a class="source-link" href="../main.go#L22-L113" target="_blank" rel="noopener" title="Open local source file"><code>main.go:22-113</code><span class="source-open" aria-hidden="true">↗</span></a></td></tr><tr><td>Route source</td><td>19 routes registered with Go 1.22 method patterns on chi; three auth middlewares wrap app/owner/chair groups</td><td><a class="source-link" href="../main.go#L71-L110" target="_blank" rel="noopener" title="Open local source file"><code>main.go:71-110</code><span class="source-open" aria-hidden="true">↗</span></a></td></tr><tr><td>Auth middleware</td><td>Each authenticated request runs one SELECT by access_token (no index on access_token)</td><td><a class="source-link" href="../middlewares.go#L20" target="_blank" rel="noopener" title="Open local source file"><code>middlewares.go:20,45,69</code><span class="source-open" aria-hidden="true">↗</span></a></td></tr><tr><td>Outbound HTTP</td><td>Payment gateway calls via http.DefaultClient with retry loop (max 5, 100ms sleep)</td><td><a class="source-link" href="../payment_gateway.go#L24-L97" target="_blank" rel="noopener" title="Open local source file"><code>payment_gateway.go:24-97</code><span class="source-open" aria-hidden="true">↗</span></a></td></tr><tr><td>Background trigger</td><td>Matching runs as GET /api/internal/matching, polled every 0.5s by a curl sidecar</td><td><a class="source-link" href="../internal_handlers.go#L10-L53" target="_blank" rel="noopener" title="Open local source file"><code>internal_handlers.go:10-53</code><span class="source-open" aria-hidden="true">↗</span></a></td></tr><tr><td>Logging</td><td>log/slog default handler (stdout) in writeError; chi middleware.Logger access log to stdout</td><td><a class="source-link" href="../main.go#L69" target="_blank" rel="noopener" title="Open local source file"><code>main.go:69,175</code><span class="source-open" aria-hidden="true">↗</span></a></td></tr><tr><td>Runtime/startup</td><td>Dockerfile builds with plain go build; compose runs nginx, webapp, mysql:8, matcher sidecar</td><td>../../development/dockerfiles/Dockerfile.go</td></tr><tr><td>Schema</td><td>Only primary keys; no secondary indexes on rides.user_id/chair_id, ride_statuses.ride_id, chair_locations.chair_id, *.access_token</td><td>../sql/1-schema.sql</td></tr><tr><td>Tests</td><td>No *_test.go files; only go build / go vet are available locally</td><td><a class="source-link" href="../go.mod" target="_blank" rel="noopener" title="Open local source file"><code>go.mod</code><span class="source-open" aria-hidden="true">↗</span></a></td></tr><tr><td>GenAI ownership</td><td>No</td><td>repository source scan (no model/provider/agent/tool code)</td></tr></tbody></table>
+    <h2>Recommendation</h2><ul><li>Select OTEL-001..OTEL-007 as the baseline, copy the generated prompt, and run $otel-instrument; add OTEL-008..OTEL-011 for the demo narrative.</li></ul>
+  </details></section>
+</main>
+<div class="tray" id="tray" hidden inert aria-hidden="true" aria-label="Instrumentation selection">
+  <div class="wrap tray-bar">
+    <div class="tray-command" aria-labelledby="instrumentCommandLabel">
+      <span class="tray-hint" id="instrumentCommandLabel">Copy this prompt and paste into AI chat</span>
+      <input class="instrument-command" id="instrumentCommand" type="text" readonly aria-labelledby="instrumentCommandLabel">
+    </div>
+  </div>
+</div>
+<div id="selectionStatus" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+<script>
+const DATA = {"report":{"schema_version":2,"kind":"otel-audit","meta":{"audit_id":"isuride-go-20261008","service_name":"isuride","commit":"53f8b62","language":"go","framework":"chi","date":"2026-10-08","status":"Partial","genai_ownership_detected":false},"summary":["11 findings. The service has no OpenTelemetry code at all: no SDK, no provider, no exporter, no instrumentation package in go.mod.","Highest priority is the SDK bootstrap plus HTTP server spans named by chi route pattern and database/sql client spans; together they make per-request query fan-out (N+1) visible in a trace waterfall.","Every hot handler issues queries in loops (nearby-chairs, notification chair stats, ride history, owner sales), and the schema has no secondary indexes, so DB spans are the main diagnostic signal for this service.","The outbound payment gateway call retries up to 5 times with 100ms sleeps inside an open DB transaction; it needs client spans and retry visibility.","No route-aware chi instrumentation exists in opentelemetry-go-contrib; route names must come from chi's RoutePattern applied onto otelhttp spans.","The internal matching endpoint (polled every 0.5s) and slog error logging are recommended follow-ups once the baseline is in place."],"flow":"audit -> select -> instrument -> verify -> configure/dashboard -> publish","evidence":[{"check":"Manifest","finding":"Go 1.23 module; go-chi/chi/v5 v5.1.0, go-sql-driver/mysql v1.8.1, jmoiron/sqlx v1.4.0, oklog/ulid/v2. No go.opentelemetry.io dependency.","source":"go.mod"},{"check":"Entry point","finding":"Single HTTP process; setup() opens sqlx DB and builds chi router, main() calls http.ListenAndServe(:8080) with no shutdown handling","source":"main.go:22-113"},{"check":"Route source","finding":"19 routes registered with Go 1.22 method patterns on chi; three auth middlewares wrap app/owner/chair groups","source":"main.go:71-110"},{"check":"Auth middleware","finding":"Each authenticated request runs one SELECT by access_token (no index on access_token)","source":"middlewares.go:20,45,69"},{"check":"Outbound HTTP","finding":"Payment gateway calls via http.DefaultClient with retry loop (max 5, 100ms sleep)","source":"payment_gateway.go:24-97"},{"check":"Background trigger","finding":"Matching runs as GET /api/internal/matching, polled every 0.5s by a curl sidecar","source":"internal_handlers.go:10-53"},{"check":"Logging","finding":"log/slog default handler (stdout) in writeError; chi middleware.Logger access log to stdout","source":"main.go:69,175"},{"check":"Runtime/startup","finding":"Dockerfile builds with plain go build; compose runs nginx, webapp, mysql:8, matcher sidecar","source":"../../development/dockerfiles/Dockerfile.go"},{"check":"Schema","finding":"Only primary keys; no secondary indexes on rides.user_id/chair_id, ride_statuses.ride_id, chair_locations.chair_id, *.access_token","source":"../sql/1-schema.sql"},{"check":"Tests","finding":"No *_test.go files; only go build / go vet are available locally","source":"go.mod"},{"check":"GenAI ownership","finding":"No","source":"repository source scan (no model/provider/agent/tool code)"}],"routes":[{"method":"POST","path":"/api/initialize"},{"method":"POST","path":"/api/app/users"},{"method":"POST","path":"/api/app/payment-methods"},{"method":"GET","path":"/api/app/rides"},{"method":"POST","path":"/api/app/rides"},{"method":"POST","path":"/api/app/rides/estimated-fare"},{"method":"POST","path":"/api/app/rides/{ride_id}/evaluation"},{"method":"GET","path":"/api/app/notification"},{"method":"GET","path":"/api/app/nearby-chairs"},{"method":"POST","path":"/api/owner/owners"},{"method":"GET","path":"/api/owner/sales"},{"method":"GET","path":"/api/owner/chairs"},{"method":"POST","path":"/api/chair/chairs"},{"method":"POST","path":"/api/chair/activity"},{"method":"POST","path":"/api/chair/coordinate"},{"method":"GET","path":"/api/chair/notification"},{"method":"POST","path":"/api/chair/rides/{ride_id}/status"},{"method":"GET","path":"/api/internal/matching"}],"signal_flow":{"component_flow_map":"process main.go [GAP: SDK bootstrap and resource identity] -> chi router + auth middleware [GAP: HTTP server spans by route] -> handlers -> sqlx/database/sql -> MySQL [GAP: Database query spans] ; handlers -> connection pool [GAP: DB connection pool metrics] ; POST /api/app/rides/{ride_id}/evaluation -> http.DefaultClient -> payment gateway [GAP: Payment gateway client spans] ; writeError -> slog stdout [GAP: Error attribution on spans] [GAP: Local OTLP application logs] ; matcher sidecar -> GET /api/internal/matching [GAP: Matching outcome visibility] ; Go runtime [GAP: Go runtime metrics] ; handlers loops [GAP: Handler business-step spans] ; POST /api/initialize -> init.sh [GAP: Initialize step visibility]"},"current_instrumentation":{"spans":[],"metrics":[],"logs":[{"integration":"slog default handler (stdout text)","source":"main.go:175","detail":"not configured: no LoggerProvider, no OTLP bridge, no trace correlation"},{"integration":"chi middleware.Logger access log (stdout)","source":"main.go:69","detail":"not configured: stdout only"}],"incident_readiness":[{"area":"HTTP server spans by route","status":"missing","evidence":"main.go:68-110 registers routes with no tracing middleware","required_signals":"http.server.request.duration with http.route; server span named '\u003cMETHOD> \u003croute pattern>'","impact":"Cannot tell which endpoint degrades during a bench run (detection + localization)."},{"area":"Database query spans","status":"missing","evidence":"main.go:62 sqlx.Connect with raw mysql driver","required_signals":"db client spans with db.system.name=mysql, db.query.text (parameterized), db.operation.name","impact":"Query fan-out and slow queries inside a request are invisible (localization)."},{"area":"DB connection pool metrics","status":"missing","evidence":"main.go:62 default pool settings (MaxIdleConns=2)","required_signals":"db.client.connection.count by state, db.client.connection.wait_time","impact":"Connection churn and port exhaustion were observed in local runs without any signal pointing at the pool (detection)."},{"area":"Payment gateway client spans","status":"missing","evidence":"payment_gateway.go:42,56 http.DefaultClient","required_signals":"http client spans for POST/GET /payments; retry attempt count","impact":"Upstream payment latency or retries are attributed to the evaluation handler without explanation (localization)."},{"area":"Matching outcome visibility","status":"missing","evidence":"internal_handlers.go:10-53 returns 204 for every outcome","required_signals":"matching outcome attribute/metric (matched, no_waiting_ride, no_free_chair), attempts count","impact":"Ride waiting time dissatisfaction cannot be tied to matching behaviour (detection)."}]},"genai_readiness":[],"findings":[{"id":"OTEL-001","title":"No OpenTelemetry SDK, exporter, or service identity","severity":"high","priority":"required","effort":"small","status":"proposed","area":"SDK bootstrap and resource identity","gap":"go.mod has no go.opentelemetry.io dependency and main.go creates no TracerProvider, MeterProvider, propagator, or resource. http.ListenAndServe has no shutdown path, so buffered telemetry would be lost on container stop.","impact":"No signal can leave the process; nothing appears in Splunk Observability for isuride.","product_outcome":"The isuride service should appear in the service map with a stable service.name and deployment environment, and buffered spans should flush on stop.","required_fix":"Add an otel.go that builds TracerProvider and MeterProvider with OTLP exporters configured only from OTEL_EXPORTER_OTLP_* env vars, a resource from OTEL_SERVICE_NAME/OTEL_RESOURCE_ATTRIBUTES with default service.name=isuride, the W3C TraceContext+Baggage propagator, and flush/shutdown on SIGTERM via http.Server.Shutdown.","instrument_mode":"default","verification_scenarios":["runtime.startup","runtime.shutdown"],"dependencies":[],"evidence":["go.mod","main.go:22-26","main.go:62"],"acceptance_criteria":["Spans and metrics export over OTLP to the endpoint given by env with service.name=isuride.","OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES override defaults and are not overwritten.","SIGTERM triggers provider ForceFlush/Shutdown before exit."],"constraints":["Do not hardcode the OTLP endpoint.","Keep a no-OTel build path possible (the measurement plan compares instrumented vs uninstrumented builds)."],"expected_telemetry":[{"type":"resource","name":"service.name=isuride","attributes":["service.name","deployment.environment.name","service.version"],"product_view":"APM service map and service filter"},{"type":"configuration","name":"OTLP trace/metric exporter from env","attributes":["OTEL_EXPORTER_OTLP_ENDPOINT","OTEL_EXPORTER_OTLP_PROTOCOL"],"product_view":"Data arriving in Splunk Observability Studio"}],"follow_up_actions":["After instrumentation, confirm isuride appears in Splunk Observability Studio service list."],"resolution":null,"resolved_commit":null},{"id":"OTEL-002","title":"HTTP requests have no route-named server spans","severity":"high","priority":"required","effort":"small","status":"proposed","area":"HTTP server spans by route","gap":"The chi router has only middleware.Logger and Recoverer. No otelhttp handler wraps it. The official contrib repository has no chi instrumentation (the otelchi path in the contrib map does not exist), so route names must be taken from chi.RouteContext(...).RoutePattern() after routing.","impact":"Operators cannot see which of the 18 endpoints is slow or failing during a benchmark, and ride/chair IDs in paths would explode cardinality if raw paths were used.","product_outcome":"Each request should appear as one server span named like 'GET /api/app/nearby-chairs' or 'POST /api/app/rides/{ride_id}/evaluation', with route-level latency, rate, and error charts.","required_fix":"Wrap the chi router with otelhttp.NewHandler (go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp) and add a small chi middleware that, after next.ServeHTTP, sets http.route and the span name from chi RoutePattern. otelhttp also emits http.server.request.duration.","instrument_mode":"default","verification_scenarios":["http.app.nearby-chairs.success","http.app.rides-evaluation.success","http.auth.failure"],"dependencies":["OTEL-001"],"evidence":["main.go:68-110","middlewares.go:10-82"],"acceptance_criteria":["Server span name and http.route use the chi pattern, never a path containing a ride ID.","http.server.request.duration has http.route, http.request.method, http.response.status_code.","Auth middleware DB query is a child of the server span."],"constraints":["Do not add the community riandyrn/otelchi when otelhttp plus RoutePattern is sufficient.","Keep route values low cardinality."],"expected_telemetry":[{"type":"span","name":"GET /api/app/nearby-chairs","attributes":["http.route","http.request.method","http.response.status_code"],"product_view":"Trace waterfall and route filtering"},{"type":"span","name":"POST /api/app/rides/{ride_id}/evaluation","attributes":["http.route"],"product_view":"Trace waterfall and route filtering"},{"type":"metric","name":"http.server.request.duration","attributes":["http.route","http.response.status_code"],"product_view":"Route latency / rate / error chart"}],"follow_up_actions":["Filter traces by http.route in Splunk Observability Studio after a bench run."],"resolution":null,"resolved_commit":null},{"id":"OTEL-003","title":"Database queries are invisible inside requests","severity":"high","priority":"required","effort":"small","status":"proposed","area":"Database query spans","gap":"sqlx.Connect uses the raw mysql driver; no database/sql instrumentation. Handlers issue queries in loops: appGetNearbyChairs (all chairs x rides x latest status), getChairStats per notification, appGetRides per ride (status, coupon, chair, owner), ownerGetSales per chair.","impact":"The dominant cost of this service (query fan-out and missing indexes) cannot be localized; a slow request looks like one opaque block.","product_outcome":"A trace for GET /api/app/nearby-chairs should show every SELECT as a child span, so repeated identical queries (N+1) are visible at a glance.","required_fix":"Open the DB with github.com/XSAM/otelsql (otelsql.Open with semconv mysql attributes) and wrap with sqlx.NewDb so all sqlx Get/Select/Exec and transactions emit client spans with parameterized db.query.text; pass ctx through. Note db.Beginx() calls drop ctx; switch to BeginTxx(ctx, nil) so transaction spans stay in the request trace.","instrument_mode":"default","verification_scenarios":["http.app.nearby-chairs.success","http.app.notification.success","http.owner.chairs.success"],"dependencies":["OTEL-001"],"evidence":["main.go:62","app_handlers.go:886-930","app_handlers.go:763-831","app_handlers.go:214-259","owner_handlers.go:123-141","app_handlers.go:195"],"acceptance_criteria":["Each SQL statement in nearby-chairs appears as a child span of the server span.","db.query.text contains placeholders only; bound argument values are not recorded.","Transaction Begin/Commit spans share the request trace."],"constraints":["Do not record query arguments.","Span name must be low cardinality (operation + table), not the full query."],"expected_telemetry":[{"type":"span","name":"SELECT isuride.rides","attributes":["db.system.name","db.query.text","db.operation.name"],"product_view":"Trace waterfall showing repeated queries"},{"type":"span","name":"SELECT isuride.ride_statuses","attributes":["db.system.name","db.query.text"],"product_view":"Trace waterfall showing repeated queries"},{"type":"metric","name":"db.client.operation.duration","attributes":["db.operation.name","db.collection.name"],"product_view":"Query latency chart"}],"follow_up_actions":["Open a nearby-chairs trace during bench and count child SELECT spans."],"resolution":null,"resolved_commit":null},{"id":"OTEL-004","title":"Connection pool saturation has no signal","severity":"medium","priority":"required","effort":"small","status":"proposed","area":"DB connection pool metrics","gap":"The pool runs with database/sql defaults (MaxIdleConns=2, unlimited open). Local runs failed with 'connect: cannot assign requested address' from connection churn, and nothing in the app exposed pool state.","impact":"Pool exhaustion or churn surfaces only as unexplained 500s.","product_outcome":"A chart should show open/idle/in-use connections and wait time during the bench, making connection churn visible before errors appear.","required_fix":"Register otelsql.RegisterDBStatsMetrics for the DB handle to emit db.client.connection.* metrics.","instrument_mode":"default","verification_scenarios":["db.pool.metrics"],"dependencies":["OTEL-003"],"evidence":["main.go:62"],"acceptance_criteria":["db.client.connection.count by state and db.client.connection.wait_time datapoints export every interval."],"constraints":["Do not change pool sizing as part of instrumentation; that is a performance change to be measured separately."],"expected_telemetry":[{"type":"metric","name":"db.client.connection.count","attributes":["db.client.connection.state"],"product_view":"Pool usage chart"},{"type":"metric","name":"db.client.connection.wait_time","attributes":[],"product_view":"Pool wait chart"}],"follow_up_actions":["Compare pool chart against error rate during bench."],"resolution":null,"resolved_commit":null},{"id":"OTEL-005","title":"Payment gateway calls and retries are untraced","severity":"medium","priority":"required","effort":"small","status":"proposed","area":"Payment gateway client spans","gap":"requestPaymentGatewayPostPayment uses http.DefaultClient with no transport instrumentation and retries up to 5 times with 100ms sleep, while the caller holds an open DB transaction.","impact":"Latency of POST /api/app/rides/{ride_id}/evaluation cannot be split between DB and the payment upstream; retries are silent; no trace context reaches the gateway.","product_outcome":"The evaluation trace should show POST /payments client spans (and GET /payments on failure) with the retry count, so upstream slowness is distinguishable from DB time.","required_fix":"Use an http.Client with otelhttp.NewTransport for payment calls and record the attempt number on each client span (or a span event per retry).","instrument_mode":"default","verification_scenarios":["http.app.rides-evaluation.success","payment.retry"],"dependencies":["OTEL-001"],"evidence":["payment_gateway.go:24-97","app_handlers.go:608"],"acceptance_criteria":["Client spans for POST /payments are children of the evaluation server span.","A retry produces a distinct span or event with the attempt number.","traceparent header is sent upstream."],"constraints":["Do not record the Authorization header or token."],"expected_telemetry":[{"type":"span","name":"POST","attributes":["http.request.method","server.address","http.response.status_code","http.request.resend_count"],"product_view":"Trace waterfall: upstream call inside evaluation"}],"follow_up_actions":["Inspect an evaluation trace for the payment child span."],"resolution":null,"resolved_commit":null},{"id":"OTEL-006","title":"Error responses are not attributed on spans","severity":"medium","priority":"required","effort":"small","status":"proposed","area":"Error attribution on spans","gap":"writeError(w, status, err) has no request context, so the error cannot be recorded on the active span. It also calls slog.Error(msg, err) with a bare error, which produces '!BADKEY=' output instead of a named attribute.","impact":"5xx spans would show status only, without the cause (e.g. 'cannot assign requested address'); 4xx business errors like 409 'ride already exists' are indistinguishable.","product_outcome":"Error traces should carry the error message and type, so the cause of 500s is visible from the trace list without reading container logs.","required_fix":"Pass r.Context() into writeError (or a request-aware variant) and call span.RecordError and span.SetStatus(codes.Error) for 5xx; log with slog.ErrorContext(ctx, msg, \"error\", err).","instrument_mode":"default","verification_scenarios":["http.error.500","http.auth.failure"],"dependencies":["OTEL-002"],"evidence":["main.go:164-176"],"acceptance_criteria":["A forced DB error yields a server span with status Error and an exception event.","4xx responses do not set span status Error."],"constraints":["Mechanical signature change only; response bodies stay identical."],"expected_telemetry":[{"type":"span","name":"exception event on server span","attributes":["exception.message","exception.type","error.type"],"product_view":"Trace error filter"}],"follow_up_actions":["Filter traces by error=true after a failing run."],"resolution":null,"resolved_commit":null},{"id":"OTEL-007","title":"Application logs are stdout only, without trace correlation","severity":"low","priority":"required","effort":"small","status":"proposed","area":"Local OTLP application logs","gap":"log/slog uses the default handler; no LoggerProvider, no otelslog bridge, no trace_id/span_id in records. No OTEL_LOGS_EXPORTER or logs endpoint is configured.","impact":"Error logs cannot be joined to the trace that produced them.","product_outcome":"slog error records should appear in local Splunk Observability Studio linked to their trace, while stdout output stays as is.","required_fix":"Add a LoggerProvider with an OTLP log exporter targeting the local Splunk Observability Studio receiver, bridge slog via go.opentelemetry.io/contrib/bridges/otelslog fanned out with the existing stdout handler, honor OTEL_LOGS_EXPORTER=none, and shut down with the other providers.","instrument_mode":"default","verification_scenarios":["logs.error.correlated"],"dependencies":["OTEL-001","OTEL-006"],"evidence":["main.go:175","main.go:24"],"acceptance_criteria":["One OTLP log record per slog call with trace_id/span_id inside a request.","stdout output unchanged.","OTEL_LOGS_EXPORTER=none emits no OTLP log record."],"constraints":["Never send logs to a cloud endpoint from this change.","Do not export the chi access log twice."],"expected_telemetry":[{"type":"log","name":"error response wrote","attributes":["trace_id","span_id","error"],"product_view":"Log view linked from trace"}],"follow_up_actions":["Open the log linked from an error trace."],"resolution":null,"resolved_commit":null},{"id":"OTEL-008","title":"Matching results are invisible","severity":"medium","priority":"recommended","effort":"small","status":"proposed","area":"Matching outcome visibility","gap":"internalGetMatching returns 204 for every outcome (no waiting ride, no free chair after 10 random tries, matched). It runs ORDER BY RAND() plus a completion subquery up to 10 times per call.","impact":"The bench penalises long waits for matching; without an outcome signal you cannot tell whether matching runs but fails to find chairs or never sees rides.","product_outcome":"A chart should show matching outcomes per minute (matched / no_waiting_ride / no_free_chair) and attempts per call.","required_fix":"Set a low-cardinality matching.outcome attribute and attempts count on the server span, and add a counter isuride.matching.outcomes{outcome} plus histogram isuride.matching.attempts.","instrument_mode":"fix all","verification_scenarios":["internal.matching.matched","internal.matching.no_ride"],"dependencies":["OTEL-002"],"evidence":["internal_handlers.go:10-53"],"acceptance_criteria":["Each matching call records exactly one outcome value.","Attempts histogram reflects the loop count (1..10)."],"constraints":["Do not change matching behaviour."],"expected_telemetry":[{"type":"metric","name":"isuride.matching.outcomes","attributes":["outcome"],"product_view":"Matching outcome chart"},{"type":"metric","name":"isuride.matching.attempts","attributes":[],"product_view":"Attempts distribution"}],"follow_up_actions":["Correlate matching outcomes with bench 'waiting for match' dissatisfaction."],"resolution":null,"resolved_commit":null},{"id":"OTEL-009","title":"Loop-heavy handlers lack step spans","severity":"low","priority":"recommended","effort":"medium","status":"proposed","area":"Handler business-step spans","gap":"getChairStats, calculateDiscountedFare, and getLatestRideStatus are called per row inside loops; with DB spans alone, the waterfall shows hundreds of flat siblings with no grouping by step.","impact":"Readers see 'many queries' but not which helper multiplies them.","product_outcome":"Traces should group repeated queries under named step spans like getChairStats, with a loop item count attribute.","required_fix":"Add internal spans around getChairStats, calculateDiscountedFare, and getLatestRideStatus callers' loops with a low-cardinality item count attribute.","instrument_mode":"fix all","verification_scenarios":["http.app.notification.success"],"dependencies":["OTEL-003"],"evidence":["app_handlers.go:763","app_handlers.go:965","app_handlers.go:286"],"acceptance_criteria":["Step spans parent their DB spans.","Item counts recorded as attributes, never IDs."],"constraints":["Span names are function names, never IDs."],"expected_telemetry":[{"type":"span","name":"getChairStats","attributes":["isuride.rides.count"],"product_view":"Grouped trace waterfall"}],"follow_up_actions":["Compare grouped vs flat waterfall in the demo."],"resolution":null,"resolved_commit":null},{"id":"OTEL-010","title":"Go runtime health is not exported","severity":"low","priority":"recommended","effort":"small","status":"proposed","area":"Go runtime metrics","gap":"No runtime instrumentation; goroutine count, heap, and GC pauses are unavailable.","impact":"CPU or GC pressure from instrumentation overhead itself cannot be observed.","product_outcome":"Charts should show goroutines, heap, and GC for isuride alongside request latency.","required_fix":"Start go.opentelemetry.io/contrib/instrumentation/runtime with the MeterProvider.","instrument_mode":"fix all","verification_scenarios":["runtime.metrics"],"dependencies":["OTEL-001"],"evidence":["main.go:22-26"],"acceptance_criteria":["go.goroutine.count, go.memory.used, go.memory.gc.goal datapoints export."],"constraints":[],"expected_telemetry":[{"type":"metric","name":"go.goroutine.count","attributes":[],"product_view":"Runtime chart"},{"type":"metric","name":"go.memory.used","attributes":["go.memory.type"],"product_view":"Runtime chart"},{"type":"metric","name":"go.memory.gc.goal","attributes":[],"product_view":"Runtime chart"}],"follow_up_actions":["Use runtime charts when measuring instrumentation overhead."],"resolution":null,"resolved_commit":null},{"id":"OTEL-011","title":"Initialize step timing is opaque","severity":"info","priority":"recommended","effort":"small","status":"proposed","area":"Initialize step visibility","gap":"POST /api/initialize shells out to ../sql/init.sh (schema + data reload) with no span around the exec.","impact":"Initialize time counts against the bench; its duration split is unknown.","product_outcome":"The initialize trace should show the init.sh exec as a child span with its duration.","required_fix":"Wrap exec.Command(\"../sql/init.sh\") in an internal span with process.exit.code.","instrument_mode":"fix all","verification_scenarios":["http.initialize.success"],"dependencies":["OTEL-002"],"evidence":["main.go:131"],"acceptance_criteria":["One init.sh span per initialize call with exit code."],"constraints":["Do not capture script output in attributes."],"expected_telemetry":[{"type":"span","name":"init.sh","attributes":["process.exit.code"],"product_view":"Trace waterfall"}],"follow_up_actions":["Check initialize duration in first bench trace."],"resolution":null,"resolved_commit":null}],"verification":{"environments":[{"id":"go.build","surface":"isuride Go module","config_evidence":"go.mod","runner":"go build ./... && go vet ./...","scope":"module","prerequisites":"Go toolchain; no tests exist in repo"},{"id":"compose.bench","surface":"isuride under development/compose-go.yml with ISUCON14 benchmarker","config_evidence":"../../development/compose-go.yml","runner":"docker compose -f development/compose-go.yml up -d --build; bench run --target http://localhost:8080 --payment-url http://host.docker.internal:12345 -t 60","scope":"full runtime","prerequisites":"OrbStack/Docker, local OTLP receiver (Splunk Observability Studio or collector), tcp_tw_reuse sysctl on nginx/webapp"}],"scenarios":[{"id":"runtime.startup","trigger":"Start the webapp container","entrypoint":"main.go:22","expected_signals":"resource service.name=isuride on first exported batch","proof_level":"full runtime","acceptance_criteria":"First exported span/metric carries service.name and env overrides are honored","environments":["compose.bench"]},{"id":"runtime.shutdown","trigger":"Stop the webapp container (SIGTERM)","entrypoint":"main.go:25","expected_signals":"final batch flushed","proof_level":"full runtime","acceptance_criteria":"Spans from the last requests before stop arrive","environments":["compose.bench"]},{"id":"http.app.nearby-chairs.success","trigger":"GET /api/app/nearby-chairs during bench","entrypoint":"app_handlers.go:834","expected_signals":"server span GET /api/app/nearby-chairs with child SELECT spans","proof_level":"full runtime","acceptance_criteria":"Route-named span; repeated SELECT rides / ride_statuses / chair_locations children","environments":["compose.bench"]},{"id":"http.app.rides-evaluation.success","trigger":"POST /api/app/rides/{ride_id}/evaluation during bench","entrypoint":"app_handlers.go:508","expected_signals":"server span with http.route pattern, DB spans, payment client span","proof_level":"full runtime","acceptance_criteria":"Span name contains {ride_id} not an actual ID; payment client span is a child","environments":["compose.bench"]},{"id":"http.app.notification.success","trigger":"GET /api/app/notification during bench","entrypoint":"app_handlers.go:661","expected_signals":"server span with getChairStats DB fan-out","proof_level":"full runtime","acceptance_criteria":"Per-ride ride_statuses SELECT children visible","environments":["compose.bench"]},{"id":"http.owner.chairs.success","trigger":"GET /api/owner/chairs during bench","entrypoint":"owner_handlers.go:193","expected_signals":"server span with one heavy window-function SELECT","proof_level":"full runtime","acceptance_criteria":"Single long DB span dominates the request","environments":["compose.bench"]},{"id":"http.auth.failure","trigger":"Request an authed route without cookie","entrypoint":"middlewares.go:14","expected_signals":"server span with 401 status, not Error","proof_level":"either","acceptance_criteria":"http.response.status_code=401; span status unset","environments":["compose.bench"]},{"id":"http.error.500","trigger":"Force a DB failure (stop db container briefly) and call an authed route","entrypoint":"main.go:164","expected_signals":"server span status Error with exception event","proof_level":"full runtime","acceptance_criteria":"exception.message present","environments":["compose.bench"]},{"id":"db.pool.metrics","trigger":"Run bench for 60s","entrypoint":"main.go:62","expected_signals":"db.client.connection.count, db.client.connection.wait_time","proof_level":"full runtime","acceptance_criteria":"Datapoints each export interval with state dimension","environments":["compose.bench"]},{"id":"payment.retry","trigger":"Bench payment server injects failures","entrypoint":"payment_gateway.go:84","expected_signals":"multiple payment client spans or retry events in one trace","proof_level":"full runtime","acceptance_criteria":"Attempt number visible","environments":["compose.bench"]},{"id":"logs.error.correlated","trigger":"Trigger a 5xx","entrypoint":"main.go:175","expected_signals":"OTLP log record with trace_id/span_id","proof_level":"full runtime","acceptance_criteria":"Exactly one OTLP record per slog call; stdout unchanged","environments":["compose.bench"]},{"id":"internal.matching.matched","trigger":"Matcher poll with waiting ride and free chair","entrypoint":"internal_handlers.go:47","expected_signals":"matching.outcome=matched, attempts recorded","proof_level":"full runtime","acceptance_criteria":"Counter increments with outcome=matched","environments":["compose.bench"]},{"id":"internal.matching.no_ride","trigger":"Matcher poll with no waiting ride","entrypoint":"internal_handlers.go:15","expected_signals":"matching.outcome=no_waiting_ride","proof_level":"either","acceptance_criteria":"Counter increments with outcome=no_waiting_ride","environments":["compose.bench"]},{"id":"runtime.metrics","trigger":"Run the service for one export interval","entrypoint":"main.go:22","expected_signals":"go.goroutine.count, go.memory.used","proof_level":"full runtime","acceptance_criteria":"Datapoints exported","environments":["compose.bench"]},{"id":"http.initialize.success","trigger":"Bench calls POST /api/initialize","entrypoint":"main.go:123","expected_signals":"init.sh child span","proof_level":"full runtime","acceptance_criteria":"One child span with exit code 0","environments":["compose.bench"]}]},"anti_patterns":["slog.Error(\"error response wrote\", err) passes a bare error as a key, producing !BADKEY output (main.go:175).","db.Beginx() drops the request context, so transactions would start outside the request trace once instrumented (app_handlers.go:195 and other handlers).","The audit library map lists go.opentelemetry.io/contrib/instrumentation/github.com/go-chi/chi/otelchi, which does not exist on the Go module proxy; only community github.com/riandyrn/otelchi exists."],"recommendation":["Select OTEL-001..OTEL-007 as the baseline, copy the generated prompt, and run $otel-instrument; add OTEL-008..OTEL-011 for the demo narrative."],"scan_blockers":[]},"selection":{"schema_version":1,"kind":"otel-selection","audit_id":"isuride-go-20261008","audit_sha256":"sha256:a402d32e98d917d73bb8acc7cf8e2412616b483a55fd9d99670638857b8e95fe","requested_ids":[],"approved_ids":[],"approved_by":null,"approved_at":null},"selection_eligibility":{"OTEL-001":{"selectable":true,"blockers":[],"reason":""},"OTEL-002":{"selectable":true,"blockers":[],"reason":""},"OTEL-003":{"selectable":true,"blockers":[],"reason":""},"OTEL-004":{"selectable":true,"blockers":[],"reason":""},"OTEL-005":{"selectable":true,"blockers":[],"reason":""},"OTEL-006":{"selectable":true,"blockers":[],"reason":""},"OTEL-007":{"selectable":true,"blockers":[],"reason":""},"OTEL-008":{"selectable":true,"blockers":[],"reason":""},"OTEL-009":{"selectable":true,"blockers":[],"reason":""},"OTEL-010":{"selectable":true,"blockers":[],"reason":""},"OTEL-011":{"selectable":true,"blockers":[],"reason":""}},"display_finding_ids":["OTEL-001","OTEL-002","OTEL-003","OTEL-004","OTEL-005","OTEL-006","OTEL-007","OTEL-008","OTEL-009","OTEL-010","OTEL-011"],"source_references":{"app_handlers.go:195":[{"text":"app_handlers.go:195","href":"../app_handlers.go#L195"}],"app_handlers.go:214-259":[{"text":"app_handlers.go:214-259","href":"../app_handlers.go#L214-L259"}],"app_handlers.go:286":[{"text":"app_handlers.go:286","href":"../app_handlers.go#L286"}],"app_handlers.go:508":[{"text":"app_handlers.go:508","href":"../app_handlers.go#L508"}],"app_handlers.go:608":[{"text":"app_handlers.go:608","href":"../app_handlers.go#L608"}],"app_handlers.go:661":[{"text":"app_handlers.go:661","href":"../app_handlers.go#L661"}],"app_handlers.go:763":[{"text":"app_handlers.go:763","href":"../app_handlers.go#L763"}],"app_handlers.go:763-831":[{"text":"app_handlers.go:763-831","href":"../app_handlers.go#L763-L831"}],"app_handlers.go:834":[{"text":"app_handlers.go:834","href":"../app_handlers.go#L834"}],"app_handlers.go:886-930":[{"text":"app_handlers.go:886-930","href":"../app_handlers.go#L886-L930"}],"app_handlers.go:965":[{"text":"app_handlers.go:965","href":"../app_handlers.go#L965"}],"go.mod":[{"text":"go.mod","href":"../go.mod"}],"internal_handlers.go:10-53":[{"text":"internal_handlers.go:10-53","href":"../internal_handlers.go#L10-L53"}],"internal_handlers.go:15":[{"text":"internal_handlers.go:15","href":"../internal_handlers.go#L15"}],"internal_handlers.go:47":[{"text":"internal_handlers.go:47","href":"../internal_handlers.go#L47"}],"main.go:123":[{"text":"main.go:123","href":"../main.go#L123"}],"main.go:131":[{"text":"main.go:131","href":"../main.go#L131"}],"main.go:164":[{"text":"main.go:164","href":"../main.go#L164"}],"main.go:164-176":[{"text":"main.go:164-176","href":"../main.go#L164-L176"}],"main.go:175":[{"text":"main.go:175","href":"../main.go#L175"}],"main.go:22":[{"text":"main.go:22","href":"../main.go#L22"}],"main.go:22-113":[{"text":"main.go:22-113","href":"../main.go#L22-L113"}],"main.go:22-26":[{"text":"main.go:22-26","href":"../main.go#L22-L26"}],"main.go:24":[{"text":"main.go:24","href":"../main.go#L24"}],"main.go:25":[{"text":"main.go:25","href":"../main.go#L25"}],"main.go:62":[{"text":"main.go:62","href":"../main.go#L62"}],"main.go:68-110":[{"text":"main.go:68-110","href":"../main.go#L68-L110"}],"main.go:69":[{"text":"main.go:69","href":"../main.go#L69"}],"main.go:69,175":[{"text":"main.go:69,175","href":"../main.go#L69"}],"main.go:71-110":[{"text":"main.go:71-110","href":"../main.go#L71-L110"}],"middlewares.go:10-82":[{"text":"middlewares.go:10-82","href":"../middlewares.go#L10-L82"}],"middlewares.go:14":[{"text":"middlewares.go:14","href":"../middlewares.go#L14"}],"middlewares.go:20,45,69":[{"text":"middlewares.go:20,45,69","href":"../middlewares.go#L20"}],"owner_handlers.go:123-141":[{"text":"owner_handlers.go:123-141","href":"../owner_handlers.go#L123-L141"}],"owner_handlers.go:193":[{"text":"owner_handlers.go:193","href":"../owner_handlers.go#L193"}],"payment_gateway.go:24-97":[{"text":"payment_gateway.go:24-97","href":"../payment_gateway.go#L24-L97"}],"payment_gateway.go:84":[{"text":"payment_gateway.go:84","href":"../payment_gateway.go#L84"}]},"service_root":"%2FUsers%2Fkaz%2FDocuments%2Fisucon%2Fisucon14%2Fwebapp%2Fgo"};
+const REPORT = DATA.report;
+const modeGuidance = {"default":{"selection":"Select","guidance":"Safe app-owned work. Select it for instrumentation."},"fix all":{"selection":"Select","guidance":"Broader safe work. Select it only when the broader scope is wanted."},"manual decision":{"selection":null,"guidance":"Choose one named OpenTelemetry outcome. The decision itself never enters instrumentation scope; compatible executable work becomes selectable."},"external follow-up":{"selection":null,"guidance":"Track this with the named external owner. This item cannot enter the instrumentation selection."}};
+const selectionEligibility = {};
+const requested = new Set(DATA.selection?.requested_ids || DATA.selection?.approved_ids || []);
+const selected = new Set(DATA.selection?.approved_ids || []);
+const decisionAnswers = new Map(
+  (DATA.selection?.decision_answers || []).map(answer => [answer.finding_id, answer.option_id])
+);
+const esc = (value) => String(value ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const byId = new Map(REPORT.findings.map(f => [f.id, f]));
+const DISPLAY_FINDINGS = (DATA.display_finding_ids || REPORT.findings.map(f => f.id))
+  .map(id => byId.get(id))
+  .filter(Boolean);
+const isSelectable = id => selectionEligibility[id]?.selectable === true;
+
+function selectedDecisionOption(finding) {
+  const optionId = decisionAnswers.get(finding.id);
+  return (finding.decision_options || []).find(option => option.id === optionId) || null;
+}
+
+function selectionBlockersFor(findingId) {
+  const blocked = new Set();
+  const visiting = new Set([findingId]);
+  function visit(dependencyId, dependentId) {
+    if (visiting.has(dependencyId)) return;
+    const dependency = byId.get(dependencyId);
+    if (!dependency) return;
+    if (dependency.instrument_mode === "manual decision") {
+      const option = selectedDecisionOption(dependency);
+      if (!option || !(option.unlocks || []).includes(dependentId)) {
+        blocked.add(dependencyId);
+        return;
+      }
+      visiting.add(dependencyId);
+      for (const nestedId of dependency.dependencies || []) visit(nestedId, dependencyId);
+      visiting.delete(dependencyId);
+      return;
+    }
+    if (["default", "fix all"].includes(dependency.instrument_mode) && dependency.status === "done") {
+      return;
+    }
+    if (["default", "fix all"].includes(dependency.instrument_mode) && ["rejected", "deferred"].includes(dependency.status)) {
+      blocked.add(dependencyId);
+      return;
+    }
+    if (!["default", "fix all"].includes(dependency.instrument_mode)) {
+      blocked.add(dependencyId);
+      return;
+    }
+    visiting.add(dependencyId);
+    for (const nestedId of dependency.dependencies || []) visit(nestedId, dependencyId);
+    visiting.delete(dependencyId);
+  }
+  for (const dependencyId of byId.get(findingId)?.dependencies || []) {
+    visit(dependencyId, findingId);
+  }
+  return REPORT.findings.map(finding => finding.id).filter(id => blocked.has(id));
+}
+
+function eligibilityFor(finding) {
+  if (finding.instrument_mode === "manual decision") {
+    return {
+      selectable: false,
+      blockers: [],
+      reason: selectedDecisionOption(finding)
+        ? "Decision recorded"
+        : (finding.decision_options || []).length
+          ? "Choose an answer"
+          : "Resolve decision first",
+    };
+  }
+  if (finding.instrument_mode === "external follow-up") {
+    return {selectable:false, blockers:[], reason:"Not selectable for instrumentation"};
+  }
+  if (["done", "rejected", "deferred"].includes(finding.status)) {
+    return {selectable:false, blockers:[], reason:"Finding is " + finding.status};
+  }
+  const blockers = selectionBlockersFor(finding.id);
+  return blockers.length
+    ? {selectable:false, blockers, reason:"Blocked by " + blockers.join(", ")}
+    : {selectable:true, blockers:[], reason:""};
+}
+
+function refreshSelectionEligibility() {
+  for (const finding of REPORT.findings) {
+    selectionEligibility[finding.id] = eligibilityFor(finding);
+  }
+}
+
+refreshSelectionEligibility();
+
+function sourceHtml(value) {
+  const parts = DATA.source_references?.[String(value)];
+  if (!parts) return `<code>${esc(value)}</code>`;
+  return parts.map(part => {
+    if (!part.href) return esc(part.text);
+    if (location.protocol === "http:" || location.protocol === "https:") {
+      return `<span class="source-reference" title="Copy this repository-relative source path"><code>${esc(part.text)}</code></span>`;
+    }
+    return `<a class="source-link" href="${esc(part.href)}" target="_blank" rel="noopener" title="Open local source file"><code>${esc(part.text)}</code><span class="source-open" aria-hidden="true">↗</span></a>`;
+  }).join("");
+}
+
+function neutralizeHttpSourceLinks() {
+  if (location.protocol !== "http:" && location.protocol !== "https:") return;
+  for (const link of document.querySelectorAll("a.source-link")) {
+    const replacement = document.createElement("span");
+    replacement.className = "source-reference";
+    replacement.title = "Copy this repository-relative source path";
+    replacement.innerHTML = link.querySelector("code")?.outerHTML || esc(link.textContent);
+    link.replaceWith(replacement);
+  }
+}
+
+function lifecycleStatus(f) {
+  if (requested.has(f.id)) return "selected";
+  if (selected.has(f.id)) return "included";
+  return f.status;
+}
+
+function decisionSelectionControl(finding) {
+  const options = finding.decision_options || [];
+  if (finding.instrument_mode !== "manual decision" || !options.length) return "";
+  const selectedOption = selectedDecisionOption(finding);
+  const optionRows = options.map(option => {
+    const inputId = `decision-${finding.id}-${option.id}`;
+    return `<label class="decision-option" for="${esc(inputId)}">
+      <input id="${esc(inputId)}" name="decision-${esc(finding.id)}" type="radio"
+        data-decision-id="${esc(finding.id)}" data-option-id="${esc(option.id)}"
+        ${selectedOption?.id === option.id ? "checked" : ""}>
+      <strong>${esc(option.label)}</strong><span>${esc(option.outcome)}</span>
+    </label>`;
+  }).join("");
+  const clear = selectedOption
+    ? `<button class="decision-clear" type="button" data-clear-decision="${esc(finding.id)}">Clear answer</button>`
+    : "";
+  return `<fieldset class="decision-select" data-decision-control="${esc(finding.id)}">
+    <legend>${esc(finding.decision_question || "Choose one telemetry outcome")}</legend>
+    <div class="decision-options">${optionRows}</div>${clear}
+  </fieldset>`;
+}
+
+function findingSelectionPresentation(finding) {
+  const explicitlySelected = requested.has(finding.id);
+  const autoIncluded = selected.has(finding.id) && !explicitlySelected;
+  return {
+    explicitlySelected,
+    autoIncluded,
+    label: autoIncluded
+      ? "Included as dependency"
+      : modeGuidance[finding.instrument_mode].selection,
+    ariaLabel: autoIncluded
+      ? `${finding.id} is included as a required dependency; select it explicitly to keep it if dependent work is removed`
+      : `Select ${finding.id} for instrumentation`,
+  };
+}
+
+function syncFindingSelectionControl(input, finding) {
+  const presentation = findingSelectionPresentation(finding);
+  input.checked = presentation.explicitlySelected;
+  input.indeterminate = presentation.autoIncluded;
+  input.dataset.selectionState = presentation.autoIncluded
+    ? "dependency"
+    : presentation.explicitlySelected
+      ? "selected"
+      : "available";
+  input.setAttribute("aria-label", presentation.ariaLabel);
+  const control = input.closest(".plan-select");
+  control?.classList.toggle("on", presentation.explicitlySelected);
+  control?.classList.toggle("included", presentation.autoIncluded);
+  const label = control?.querySelector("[data-selection-label]");
+  if (label) label.textContent = presentation.label;
+}
+
+function findingPrimaryActionLabel(finding) {
+  if (finding.instrument_mode === "manual decision") return "Decision needed";
+  if (finding.instrument_mode === "external follow-up") return "External requirement";
+  return "Instrumentation change";
+}
+
+function telemetryShapeFor(finding) {
+  const order = ["span", "metric", "log", "resource", "configuration"];
+  const counts = new Map(order.map(type => [type, 0]));
+  (finding.expected_telemetry || []).forEach(item => counts.set(item.type, (counts.get(item.type) || 0) + 1));
+  return order
+    .filter(type => counts.get(type))
+    .map(type => `${counts.get(type)} ${type}${counts.get(type) === 1 ? "" : "s"}`)
+    .join(" · ") || "not specified";
+}
+
+function findingNextStep(finding) {
+  const eligibility = selectionEligibility[finding.id] || {selectable:false, blockers:[], reason:"Not selectable for instrumentation"};
+  if (finding.instrument_mode === "manual decision") {
+    const option = selectedDecisionOption(finding);
+    if (!option) {
+      return `Choose one answer with ${finding.decision_owner || "the named owner"}, then select any unlocked executable work.`;
+    }
+    return (option.unlocks || []).length
+      ? "Review the executable work unlocked by this answer and select the work you want in the command."
+      : "This answer unlocks no instrumentation work. Keep the decision in the audit; no selection is needed.";
+  }
+  if (finding.instrument_mode === "external follow-up") {
+    const requirement = finding.external_requirement ? ` Required telemetry: ${finding.external_requirement}` : "";
+    return `Track this with ${finding.external_owner || "the named external owner"}; it is not instrumentation scope for this service.${requirement}`;
+  }
+  if ((eligibility.blockers || []).length) {
+    return `Resolve ${eligibility.blockers.join(", ")} first, then return to select this work.`;
+  }
+  if (!eligibility.selectable) {
+    return `${eligibility.reason || "This finding cannot enter the current instrumentation selection"}.`;
+  }
+  if (requested.has(finding.id)) {
+    return "This finding is selected. Copy the generated prompt and paste into AI chat.";
+  }
+  if (selected.has(finding.id)) {
+    return "This finding is included because selected work depends on it. Copy the generated prompt and paste into AI chat.";
+  }
+  return "Select this finding, then copy the generated prompt and paste into AI chat.";
+}
+
+function renderCards() {
+  document.getElementById("cards").innerHTML = DISPLAY_FINDINGS.map(f => {
+    const lifecycle = lifecycleStatus(f);
+    const mode = modeGuidance[f.instrument_mode];
+    const telemetry = (f.expected_telemetry || []).map(item => `<li><b>${esc(item.type)} ${esc(item.name)}</b> — ${esc(item.product_view)}${item.attributes?.length ? ` <code>${esc(item.attributes.join(", "))}</code>` : ""}</li>`).join("");
+    const evidence = (f.evidence || []).map(item => `<li>${sourceHtml(item)}</li>`).join("");
+    const acceptance = (f.acceptance_criteria || []).map(item => `<li>${esc(item)}</li>`).join("");
+    const constraints = (f.constraints || []).map(item => `<li>${esc(item)}</li>`).join("");
+    const countLabel = (count, singular) => `${count} ${singular}${count === 1 ? "" : "s"}`;
+    const contractCounts = [
+      countLabel((f.acceptance_criteria || []).length, "acceptance check"),
+      countLabel((f.constraints || []).length, "implementation guardrail"),
+      countLabel((f.evidence || []).length, "source reference"),
+    ].join(" · ");
+    const telemetryShape = telemetryShapeFor(f);
+    const dependencyCue = (f.dependencies || []).length
+      ? `<span>Plan prerequisite${f.dependencies.length === 1 ? "" : "s"}: <code>${esc(f.dependencies.join(", "))}</code></span>`
+      : "";
+    const primaryActionLabel = findingPrimaryActionLabel(f);
+    const requiredAction = f.instrument_mode === "external follow-up"
+      ? [f.required_fix, f.external_requirement ? `Required telemetry: ${f.external_requirement}` : "", f.external_owner ? `Owner: ${f.external_owner}` : ""].filter(Boolean).join(" ")
+      : f.required_fix;
+    const eligibility = selectionEligibility[f.id] || {selectable:false, blockers:[], reason:"Not selectable for instrumentation"};
+    const decisionControl = decisionSelectionControl(f);
+    const selectionPresentation = findingSelectionPresentation(f);
+    const selectionControl = decisionControl || (eligibility.selectable
+      ? (() => {
+          const selectionClasses = [
+            selectionPresentation.explicitlySelected ? "on" : "",
+            selectionPresentation.autoIncluded ? "included" : "",
+          ].filter(Boolean).join(" ");
+          return `<label class="plan-select ${selectionClasses}" for="plan-${esc(f.id)}" title="${esc(mode.guidance)}">
+            <input id="plan-${esc(f.id)}" name="plan-${esc(f.id)}" type="checkbox" aria-label="${esc(selectionPresentation.ariaLabel)}" data-id="${esc(f.id)}" data-selection-state="${selectionPresentation.autoIncluded ? "dependency" : selectionPresentation.explicitlySelected ? "selected" : "available"}" ${selectionPresentation.explicitlySelected ? "checked" : ""}> <span data-selection-label>${esc(selectionPresentation.label)}</span>
+          </label>`;
+        })()
+      : `<div class="plan-unavailable" role="note">${esc(eligibility.reason)}</div>`);
+    return `<article class="card ${["done","working"].includes(lifecycle) ? lifecycle : ""}" id="${esc(f.id)}">
+      <div class="card-head">
+        <button class="row" id="finding-toggle-${esc(f.id)}" type="button" aria-expanded="false" aria-controls="finding-body-${esc(f.id)}">
+          <span class="spine" aria-hidden="true"></span>
+          <span class="fid">${esc(f.id)}</span>
+          <span class="finding-copy"><span class="ftitle">${esc(f.title)}</span><span class="fimpact">What you get: ${esc(f.product_outcome)}</span><span class="finding-meta"><span>Telemetry: <strong>${esc(telemetryShape)}</strong></span>${dependencyCue}</span></span>
+          <span class="caret" aria-hidden="true">›</span>
+        </button>
+        ${selectionControl}
+      </div>
+      <div class="body" id="finding-body-${esc(f.id)}" aria-labelledby="finding-toggle-${esc(f.id)}" hidden>
+        <div class="cols">
+          <section><h3>Gap</h3><p>${esc(f.gap)}</p></section>
+          <section><h3>Why it matters</h3><p>${esc(f.impact)}</p></section>
+          <section><h3>${esc(primaryActionLabel)}</h3><p>${esc(requiredAction)}</p></section>
+          <section><h3>Next step</h3><p data-finding-next-step="${esc(f.id)}">${esc(findingNextStep(f))}</p></section>
+        </div>
+        <details class="finding-technical-details">
+          <summary><span>Technical details</span> <span class="detail-counts">${esc(contractCounts)}</span></summary>
+          <div class="technical-details-body">
+            <section><h3>Expected telemetry</h3>${telemetry ? `<ul>${telemetry}</ul>` : `<p class="muted">None recorded.</p>`}</section>
+            <section><h3>Acceptance criteria</h3><ul>${acceptance}</ul></section>
+            ${constraints ? `<section><h3>Implementation guardrails</h3><ul>${constraints}</ul></section>` : ""}
+            <section><h3>Evidence</h3>${evidence ? `<ul>${evidence}</ul>` : `<p class="muted">None recorded.</p>`}</section>
+          </div>
+        </details>
+      </div>
+    </article>`;
+  }).join("");
+  syncFindingSelectionState();
+}
+
+function orderedSelection() {
+  return REPORT.findings.map(f => f.id).filter(id => selected.has(id) && isSelectable(id));
+}
+
+function orderedRequested() {
+  return REPORT.findings.map(f => f.id).filter(id => requested.has(id) && selected.has(id) && isSelectable(id));
+}
+
+function orderedDecisionAnswers() {
+  return REPORT.findings
+    .filter(finding => decisionAnswers.has(finding.id))
+    .map(finding => ({finding_id:finding.id, option_id:decisionAnswers.get(finding.id)}));
+}
+
+function announceSelection(message) {
+  document.getElementById("selectionStatus").textContent = message;
+}
+
+function shellQuote(value) {
+  return "'" + String(value).replaceAll("'", "'\"'\"'") + "'";
+}
+
+function commandPart(value) {
+  const text = String(value);
+  return /^--[A-Za-z0-9][A-Za-z0-9_-]*$/.test(text) || /^[A-Za-z0-9_,.=:-]+$/.test(text)
+    ? text
+    : shellQuote(text);
+}
+
+function serviceRootFromLocation() {
+  if (DATA.service_root) return decodeURIComponent(DATA.service_root);
+  if (location.protocol === "file:") {
+    let path = decodeURIComponent(location.pathname || "");
+    if (location.hostname) {
+      path = `//${location.hostname}${path}`;
+    } else if (/^\/[A-Za-z]:\//.test(path)) {
+      path = path.slice(1);
+    }
+    const marker = "/.observe/";
+    const index = path.lastIndexOf(marker);
+    if (index > 0) return path.slice(0, index);
+  }
+  return "";
+}
+
+function terminalInstrumentCommand() {
+  const ids = orderedRequested();
+  if (!ids.length) {
+    return "Select at least one executable finding to generate an instrumentation command.";
+  }
+  const serviceRoot = serviceRootFromLocation();
+  if (!serviceRoot) {
+    return "Regenerate this report with its validated service root before instrumenting.";
+  }
+  const parts = ["$otel-instrument", "--ids", ids.join(",")];
+  for (const answer of orderedDecisionAnswers()) {
+    parts.push("--decision", `${answer.finding_id}=${answer.option_id}`);
+  }
+  parts.push(serviceRoot);
+  return parts.map((part, index) => index === 0 ? part : commandPart(part)).join(" ");
+}
+
+function renderInstrumentCommand() {
+  const node = document.getElementById("instrumentCommand");
+  if (node) node.value = terminalInstrumentCommand();
+}
+
+function renderTray() {
+  const requestedIds = orderedRequested();
+  const hasSelection = requestedIds.length > 0 || decisionAnswers.size > 0;
+  const tray = document.getElementById("tray");
+  tray.hidden = !hasSelection;
+  tray.toggleAttribute("inert", !hasSelection);
+  tray.setAttribute("aria-hidden", String(!hasSelection));
+  renderInstrumentCommand();
+}
+
+function syncDependencyClosure() {
+  const closed = new Set();
+  const visiting = new Set();
+  function include(id) {
+    const finding = byId.get(id);
+    if (!finding || closed.has(id) || visiting.has(id)) return;
+    if (["default", "fix all"].includes(finding.instrument_mode) && finding.status === "done") return;
+    const selectable = isSelectable(id);
+    if (!selectable && finding.instrument_mode !== "manual decision") return;
+    visiting.add(id);
+    for (const dependency of finding.dependencies || []) include(dependency);
+    visiting.delete(id);
+    if (selectable) closed.add(id);
+  }
+  for (const finding of REPORT.findings) {
+    if (requested.has(finding.id) && isSelectable(finding.id)) include(finding.id);
+  }
+  selected.clear();
+  for (const id of closed) selected.add(id);
+}
+
+function pruneIncompatibleSelections() {
+  const removed = [];
+  for (const finding of REPORT.findings) {
+    if (requested.has(finding.id) && !isSelectable(finding.id)) {
+      requested.delete(finding.id);
+      removed.push(finding.id);
+    }
+  }
+  return removed;
+}
+
+function applyDecisionAnswer(decisionId, optionId) {
+  const finding = byId.get(decisionId);
+  if (!finding || finding.instrument_mode !== "manual decision") return;
+  const previous = decisionAnswers.get(decisionId);
+  if (optionId) decisionAnswers.set(decisionId, optionId);
+  else decisionAnswers.delete(decisionId);
+  refreshSelectionEligibility();
+  const removed = pruneIncompatibleSelections();
+  syncDependencyClosure();
+  renderCards();
+  renderTray();
+  const focusId = optionId ? `decision-${decisionId}-${optionId}` : `finding-toggle-${decisionId}`;
+  document.getElementById(focusId)?.focus({preventScroll:true});
+  const option = selectedDecisionOption(finding);
+  let message = option
+    ? `${decisionId} answer recorded: ${option.label}. Matching executable work is now available but has not been selected.`
+    : `${decisionId} answer cleared. Dependent work is blocked again.`;
+  if (previous && previous !== optionId) message = `${decisionId} answer changed to ${option?.label || "unanswered"}.`;
+  if (removed.length) message += " Removed incompatible selected work: " + removed.join(", ") + ".";
+  announceSelection(message);
+}
+
+function syncFindingSelectionState() {
+  for (const finding of REPORT.findings) {
+    const card = document.getElementById(finding.id);
+    if (!card) continue;
+    const input = document.getElementById("plan-" + finding.id);
+    if (input) {
+      syncFindingSelectionControl(input, finding);
+    }
+    const nextStep = card.querySelector("[data-finding-next-step]");
+    if (nextStep) nextStep.textContent = findingNextStep(finding);
+  }
+}
+
+function applySelectionInput(input) {
+  const id = input.dataset.id;
+  if (!isSelectable(id)) return;
+  const before = new Set(selected);
+  if (input.checked) requested.add(id);
+  else requested.delete(id);
+  syncDependencyClosure();
+  syncFindingSelectionState();
+  renderTray();
+
+  const added = REPORT.findings.map(finding => finding.id)
+    .filter(findingId => selected.has(findingId) && !before.has(findingId));
+  const removed = REPORT.findings.map(finding => finding.id)
+    .filter(findingId => before.has(findingId) && !selected.has(findingId));
+  let message;
+  if (input.checked) {
+    const dependencies = added.filter(findingId => findingId !== id);
+    message = id + " selected.";
+    if (dependencies.length) message += " Auto-added dependencies: " + dependencies.join(", ") + ".";
+  } else if (selected.has(id)) {
+    message = id + " remains included because another selected item requires it.";
+  } else {
+    message = id + " deselected.";
+    const related = removed.filter(findingId => findingId !== id);
+    if (related.length) message += " Removed no-longer-needed dependencies: " + related.join(", ") + ".";
+  }
+  announceSelection(message);
+}
+
+function setFindingOpen(card, open) {
+  const disclosure = card.querySelector(".row");
+  const body = disclosure ? document.getElementById(disclosure.getAttribute("aria-controls")) : null;
+  card.classList.toggle("open", open);
+  disclosure?.setAttribute("aria-expanded", String(open));
+  if (body) body.hidden = !open;
+  return disclosure;
+}
+
+function openFindingTarget(target) {
+  const disclosure = setFindingOpen(target, true);
+  target.scrollIntoView({behavior: "smooth", block: "start"});
+  disclosure?.focus({preventScroll: true});
+}
+
+function targetFromHash(hash) {
+  if (!hash?.startsWith("#")) return null;
+  try { return document.getElementById(decodeURIComponent(hash.slice(1))); } catch (_) { return null; }
+}
+
+function revealCurrentHash() {
+  if (!location.hash) return;
+  const target = targetFromHash(location.hash);
+  if (target?.matches(".card")) openFindingTarget(target);
+}
+
+document.addEventListener("click", event => {
+  const clearDecision = event.target.closest("[data-clear-decision]");
+  if (clearDecision) {
+    applyDecisionAnswer(clearDecision.dataset.clearDecision, null);
+    return;
+  }
+  const findingJump = event.target.closest("[data-finding-jump][href]");
+  if (findingJump) {
+    event.preventDefault();
+    const target = targetFromHash(findingJump.getAttribute("href"));
+    if (!target) return;
+    openFindingTarget(target);
+    history.replaceState(null, "", findingJump.getAttribute("href"));
+    return;
+  }
+  const row = event.target.closest(".row");
+  if (!row) return;
+  const card = row.closest(".card");
+  setFindingOpen(card, !card.classList.contains("open"));
+});
+
+document.addEventListener("change", event => {
+  const decisionInput = event.target.closest("input[data-decision-id][data-option-id]");
+  if (decisionInput) {
+    applyDecisionAnswer(decisionInput.dataset.decisionId, decisionInput.dataset.optionId);
+    return;
+  }
+  const input = event.target.closest("input[data-id]");
+  if (!input) return;
+  applySelectionInput(input);
+});
+
+syncDependencyClosure();
+renderCards();
+neutralizeHttpSourceLinks();
+renderTray();
+revealCurrentHash();
+window.addEventListener("hashchange", revealCurrentHash);
+</script>
+</body>
+</html>
