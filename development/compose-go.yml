@@ -7,6 +7,10 @@ services:
       - ../frontend/build/client:/home/isucon/webapp/public:ro
     ports:
       - "8080:80"
+    # 本番は nginx→localhost でループバック限定の tw_reuse(=2) が効くが、
+    # docker の bridge 越しでは効かずエフェメラルポートが枯渇するため
+    sysctls:
+      net.ipv4.tcp_tw_reuse: 1
     depends_on:
       - webapp
   webapp:
@@ -24,6 +28,9 @@ services:
         condition: service_healthy
     environment:
       ISUCON_DB_HOST: db
+    # webapp→db も本番はループバック。nginx と同じ理由
+    sysctls:
+      net.ipv4.tcp_tw_reuse: 1
     extra_hosts:
       - "host.docker.internal:host-gateway"
   db:
