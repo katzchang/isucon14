@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"log/slog"
@@ -42,9 +44,14 @@ var (
 	tracer = otel.Tracer(instrumentationName)
 
 	// initAppMetrics で MeterProvider 登録後に作る
-	matchingOutcomes metric.Int64Counter
-	matchingAttempts metric.Int64Histogram
+	matchingOutcomes  metric.Int64Counter
+	matchingAttempts  metric.Int64Histogram
+	dbCallsPerRequest metric.Int64Histogram
 )
+
+// buildVersion はビルド時に -ldflags "-X main.buildVersion=<commit>" で埋め込む。
+// 空なら service.version を付けない。
+var buildVersion string
 
 // setupOTel は TracerProvider / MeterProvider / Propagator を初期化する。
 // エクスポート先は OTEL_EXPORTER_OTLP_* 環境変数だけで決まる。
@@ -54,11 +61,7 @@ func setupOTel(ctx context.Context) (func(context.Context) error, error) {
 		return func(context.Context) error { return nil }, nil
 	}
 
-	// 既定値を先に置き、環境変数由来の属性で上書きする
-	res, err := resource.Merge(
-		resource.NewSchemaless(attribute.String("service.name", defaultServiceName)),
-		mustResource(resource.New(ctx, resource.WithFromEnv(), resource.WithTelemetrySDK())),
-	)
+	res, err := newResource(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +113,18 @@ func setupOTel(ctx context.Context) (func(context.Context) error, error) {
 	}, nil
 }
 
+// newResource は既定値を先に置き、環境変数 (OTEL_SERVICE_NAME / OTEL_RESOURCE_ATTRIBUTES) 由来の属性で上書きする。
+func newResource(ctx context.Context) (*resource.Resource, error) {
+	defaults := []attribute.KeyValue{attribute.String("service.name", defaultServiceName)}
+	if buildVersion != "" {
+		defaults = append(defaults, attribute.String("service.version", buildVersion))
+	}
+	return resource.Merge(
+		resource.NewSchemaless(defaults...),
+		mustResource(resource.New(ctx, resource.WithFromEnv(), resource.WithTelemetrySDK())),
+	)
+}
+
 func initAppMetrics() error {
 	meter := otel.Meter(instrumentationName)
 	var err error
@@ -123,6 +138,13 @@ func initAppMetrics() error {
 		metric.WithDescription("Random chair picks tried per matching run"),
 		metric.WithUnit("{attempt}"),
 		metric.WithExplicitBucketBoundaries(1, 2, 3, 5, 8, 10))
+	if err != nil {
+		return err
+	}
+	dbCallsPerRequest, err = meter.Int64Histogram("isuride.http.server.db_calls",
+		metric.WithDescription("Database statements executed per HTTP request"),
+		metric.WithUnit("{call}"),
+		metric.WithExplicitBucketBoundaries(1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000))
 	return err
 }
 
@@ -215,11 +237,22 @@ func envMillis(key string, def int) time.Duration {
 
 // openInstrumentedDB は database/sql を otelsql で包んで開く。
 // クエリ引数は記録しない (otelsql は db.statement にプレースホルダ付きの SQL だけを載せる)。
-func openInstrumentedDB(dsn string) (*sql.DB, error) {
+// interpolateParams は DSN の設定値。false のとき go-sql-driver は引数付きの
+// conn.Query/Exec で driver.ErrSkip を返し、prepare + stmt で実行し直す。
+func openInstrumentedDB(dsn string, interpolateParams bool) (*sql.DB, error) {
 	attrs := []attribute.KeyValue{attribute.String("db.system.name", "mysql"), attribute.String("db.system", "mysql")}
 	sqlDB, err := otelsql.Open("mysql", dsn,
 		otelsql.WithAttributes(attrs...),
 		otelsql.WithSpanNameFormatter(dbSpanName),
+		otelsql.WithAttributesGetter(dbQueryAttributes),
+		// メトリクス側でも driver.ErrSkip をエラーにしない (スパン側は DisableErrSkip)
+		otelsql.WithDisableSkipErrMeasurement(true),
+		otelsql.WithInstrumentAttributesGetter(func(ctx context.Context, method otelsql.Method, query string, args []driver.NamedValue) []attribute.KeyValue {
+			if executedStatement(method, args, interpolateParams) {
+				countDBCall(ctx)
+			}
+			return dbQueryAttributes(ctx, method, query, args)
+		}),
 		otelsql.WithSpanOptions(otelsql.SpanOptions{
 			OmitConnResetSession: true,
 			OmitRows:             true,
@@ -239,14 +272,37 @@ func openInstrumentedDB(dsn string) (*sql.DB, error) {
 
 // dbSpanName は "SELECT rides" のように操作名とテーブル名だけでスパン名を作る (低カーディナリティ)。
 func dbSpanName(_ context.Context, method otelsql.Method, query string) string {
-	if query == "" {
+	op, table := parseSQL(query)
+	switch {
+	case op == "":
 		return string(method)
+	case table == "":
+		return op
+	default:
+		return op + " " + table
 	}
+}
+
+// dbQueryAttributes はスパン名と同じ解析結果を db.operation.name / db.collection.name として付ける。
+func dbQueryAttributes(_ context.Context, _ otelsql.Method, query string, _ []driver.NamedValue) []attribute.KeyValue {
+	op, table := parseSQL(query)
+	if op == "" {
+		return nil
+	}
+	if table == "" {
+		return []attribute.KeyValue{attribute.String("db.operation.name", op)}
+	}
+	return []attribute.KeyValue{attribute.String("db.operation.name", op), attribute.String("db.collection.name", table)}
+}
+
+// parseSQL は先頭のキーワードを操作名、FROM/INTO/UPDATE の直後をテーブル名として返す。
+// サブクエリや解析できない文ではテーブル名を空にする。
+func parseSQL(query string) (op, table string) {
 	fields := strings.Fields(query)
 	if len(fields) == 0 {
-		return string(method)
+		return "", ""
 	}
-	op := strings.ToUpper(fields[0])
+	op = strings.ToUpper(fields[0])
 	var marker string
 	switch op {
 	case "SELECT", "DELETE":
@@ -254,23 +310,40 @@ func dbSpanName(_ context.Context, method otelsql.Method, query string) string {
 	case "INSERT":
 		marker = "INTO"
 	case "UPDATE":
-		return op + " " + cleanTable(fieldAt(fields, 1))
+		return op, cleanTable(fieldAt(fields, 1))
 	default:
-		return op
+		return op, ""
 	}
 	for i, f := range fields {
 		if strings.EqualFold(f, marker) {
 			// FROM (SELECT ...) のようなサブクエリはテーブル名を付けない
 			if next := fieldAt(fields, i+1); strings.HasPrefix(next, "(") {
-				break
+				return op, ""
 			}
-			if t := cleanTable(fieldAt(fields, i+1)); t != "" {
-				return op + " " + t
-			}
-			break
+			return op, cleanTable(fieldAt(fields, i+1))
 		}
 	}
-	return op
+	return op, ""
+}
+
+// executedStatement は実際に DB で 1 回実行された文かを返す。
+// prepare と、ErrSkip でプリペアドに切り替わる conn 側の呼び出しは数えない。
+func executedStatement(method otelsql.Method, args []driver.NamedValue, interpolateParams bool) bool {
+	switch method {
+	case otelsql.MethodStmtExec, otelsql.MethodStmtQuery:
+		return true
+	case otelsql.MethodConnExec, otelsql.MethodConnQuery:
+		return len(args) == 0 || interpolateParams
+	}
+	return false
+}
+
+type dbCallCounterKey struct{}
+
+func countDBCall(ctx context.Context) {
+	if c, ok := ctx.Value(dbCallCounterKey{}).(*atomic.Int64); ok {
+		c.Add(1)
+	}
 }
 
 func fieldAt(fields []string, i int) string {
@@ -286,9 +359,15 @@ func cleanTable(s string) string {
 
 // otelRouteMiddleware は chi のルーティング後に、ルートパターンを
 // otelhttp のサーバースパン名・http.route 属性・メトリクス属性へ反映する。
+// あわせて、リクエスト中に実行された DB 文の数を数えて記録する。
 func otelRouteMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dbCalls := new(atomic.Int64)
+		r = r.WithContext(context.WithValue(r.Context(), dbCallCounterKey{}, dbCalls))
 		next.ServeHTTP(w, r)
+
+		span := trace.SpanFromContext(r.Context())
+		span.SetAttributes(attribute.Int64("isuride.db.call_count", dbCalls.Load()))
 
 		rctx := chi.RouteContext(r.Context())
 		if rctx == nil {
@@ -298,7 +377,9 @@ func otelRouteMiddleware(next http.Handler) http.Handler {
 		if pattern == "" {
 			return
 		}
-		span := trace.SpanFromContext(r.Context())
+		if dbCallsPerRequest != nil {
+			dbCallsPerRequest.Record(r.Context(), dbCalls.Load(), metric.WithAttributes(attribute.String("http.route", pattern)))
+		}
 		span.SetName(r.Method + " " + pattern)
 		span.SetAttributes(attribute.String("http.route", pattern))
 		if labeler, ok := otelhttp.LabelerFromContext(r.Context()); ok {

@@ -17,6 +17,9 @@ services:
     build:
       context: ../webapp/go
       dockerfile: ../../development/dockerfiles/Dockerfile.go
+      args:
+        # GIT_COMMIT=$(git rev-parse --short HEAD) docker compose ... up --build で service.version になる
+        GIT_COMMIT: ${GIT_COMMIT:-}
     image: webapp-go
     expose:
       - 8080
@@ -35,6 +38,8 @@ services:
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
       OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      # otelsql: 既存の db.sql.latency に加えて db.client.operation.duration と db.query.text も出す
+      OTEL_SEMCONV_STABILITY_OPT_IN: ${OTEL_SEMCONV_STABILITY_OPT_IN:-database/dup}
       # アプリログはローカルの obstudio だけに送る (クラウドへは送らない)
       OTEL_LOGS_EXPORTER: ${OTEL_LOGS_EXPORTER:-otlp}
       OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: http://host.docker.internal:4318/v1/logs

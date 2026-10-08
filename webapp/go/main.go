@@ -90,7 +90,7 @@ func setup() http.Handler {
 	dbConfig.DBName = dbname
 	dbConfig.ParseTime = true
 
-	sqlDB, err := openInstrumentedDB(dbConfig.FormatDSN())
+	sqlDB, err := openInstrumentedDB(dbConfig.FormatDSN(), dbConfig.InterpolateParams)
 	if err != nil {
 		panic(err)
 	}
