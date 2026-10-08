@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	crand "crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -9,20 +10,50 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
+	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var db *sqlx.DB
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+
+	shutdownOTel, err := setupOTel(ctx)
+	if err != nil {
+		panic(err)
+	}
+
 	mux := setup()
+	srv := &http.Server{Addr: ":8080", Handler: otelhttp.NewHandler(mux, "server")}
+	go func() {
+		<-ctx.Done()
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(sctx)
+	}()
 	slog.Info("Listening on :8080")
-	http.ListenAndServe(":8080", mux)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Error("server error", "error", err)
+	}
+
+	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := shutdownOTel(sctx); err != nil {
+		slog.Error("otel shutdown error", "error", err)
+	}
 }
 
 func setup() http.Handler {
@@ -59,15 +90,20 @@ func setup() http.Handler {
 	dbConfig.DBName = dbname
 	dbConfig.ParseTime = true
 
-	_db, err := sqlx.Connect("mysql", dbConfig.FormatDSN())
+	sqlDB, err := openInstrumentedDB(dbConfig.FormatDSN())
 	if err != nil {
 		panic(err)
 	}
-	db = _db
+	db = sqlx.NewDb(sqlDB, "mysql")
+	if err := db.Ping(); err != nil {
+		panic(err)
+	}
 
 	mux := chi.NewRouter()
+	mux.Use(otelRouteMiddleware)
 	mux.Use(middleware.Logger)
 	mux.Use(middleware.Recoverer)
+	mux.Use(requestContextMiddleware)
 	mux.HandleFunc("POST /api/initialize", postInitialize)
 
 	// app handlers
@@ -128,10 +164,19 @@ func postInitialize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if out, err := exec.Command("../sql/init.sh").CombinedOutput(); err != nil {
+	_, initSpan := tracer.Start(ctx, "init.sh")
+	cmd := exec.Command("../sql/init.sh")
+	out, err := cmd.CombinedOutput()
+	if cmd.ProcessState != nil {
+		initSpan.SetAttributes(attribute.Int("process.exit.code", cmd.ProcessState.ExitCode()))
+	}
+	if err != nil {
+		initSpan.SetStatus(codes.Error, "init.sh failed")
+		initSpan.End()
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("failed to initialize: %s: %w", string(out), err))
 		return
 	}
+	initSpan.End()
 
 	if _, err := db.ExecContext(ctx, "UPDATE settings SET value = ? WHERE name = 'payment_gateway_url'", req.PaymentServer); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -172,7 +217,13 @@ func writeError(w http.ResponseWriter, statusCode int, err error) {
 	}
 	w.Write(buf)
 
-	slog.Error("error response wrote", err)
+	ctx := contextFromWriter(w)
+	if statusCode >= http.StatusInternalServerError {
+		span := trace.SpanFromContext(ctx)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	slog.ErrorContext(ctx, "error response wrote", "error", err, "http.response.status_code", statusCode)
 }
 
 func secureRandomStr(b int) string {

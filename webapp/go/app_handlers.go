@@ -10,6 +10,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/oklog/ulid/v2"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type appPostUsersRequest struct {
@@ -41,7 +44,7 @@ func appPostUsers(w http.ResponseWriter, r *http.Request) {
 	accessToken := secureRandomStr(32)
 	invitationCode := secureRandomStr(15)
 
-	tx, err := db.Beginx()
+	tx, err := db.BeginTxx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -192,7 +195,7 @@ func appGetRides(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := ctx.Value("user").(*User)
 
-	tx, err := db.Beginx()
+	tx, err := db.BeginTxx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -210,9 +213,11 @@ func appGetRides(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	loopCtx, loopSpan := tracer.Start(ctx, "appGetRides.buildItems", trace.WithAttributes(attribute.Int("isuride.rides.count", len(rides))))
+	defer loopSpan.End()
 	items := []getAppRidesResponseItem{}
 	for _, ride := range rides {
-		status, err := getLatestRideStatus(ctx, tx, ride.ID)
+		status, err := getLatestRideStatus(loopCtx, tx, ride.ID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -221,7 +226,7 @@ func appGetRides(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		fare, err := calculateDiscountedFare(ctx, tx, user.ID, &ride, ride.PickupLatitude, ride.PickupLongitude, ride.DestinationLatitude, ride.DestinationLongitude)
+		fare, err := calculateDiscountedFare(loopCtx, tx, user.ID, &ride, ride.PickupLatitude, ride.PickupLongitude, ride.DestinationLatitude, ride.DestinationLongitude)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -240,7 +245,7 @@ func appGetRides(w http.ResponseWriter, r *http.Request) {
 		item.Chair = getAppRidesResponseItemChair{}
 
 		chair := &Chair{}
-		if err := tx.GetContext(ctx, chair, `SELECT * FROM chairs WHERE id = ?`, ride.ChairID); err != nil {
+		if err := tx.GetContext(loopCtx, chair, `SELECT * FROM chairs WHERE id = ?`, ride.ChairID); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -249,7 +254,7 @@ func appGetRides(w http.ResponseWriter, r *http.Request) {
 		item.Chair.Model = chair.Model
 
 		owner := &Owner{}
-		if err := tx.GetContext(ctx, owner, `SELECT * FROM owners WHERE id = ?`, chair.OwnerID); err != nil {
+		if err := tx.GetContext(loopCtx, owner, `SELECT * FROM owners WHERE id = ?`, chair.OwnerID); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -258,6 +263,7 @@ func appGetRides(w http.ResponseWriter, r *http.Request) {
 		items = append(items, item)
 	}
 
+	loopSpan.End()
 	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -306,7 +312,7 @@ func appPostRides(w http.ResponseWriter, r *http.Request) {
 	user := ctx.Value("user").(*User)
 	rideID := ulid.Make().String()
 
-	tx, err := db.Beginx()
+	tx, err := db.BeginTxx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -462,7 +468,7 @@ func appPostRidesEstimatedFare(w http.ResponseWriter, r *http.Request) {
 
 	user := ctx.Value("user").(*User)
 
-	tx, err := db.Beginx()
+	tx, err := db.BeginTxx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -519,7 +525,7 @@ func appPostRideEvaluatation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := db.Beginx()
+	tx, err := db.BeginTxx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -662,7 +668,7 @@ func appGetNotification(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := ctx.Value("user").(*User)
 
-	tx, err := db.Beginx()
+	tx, err := db.BeginTxx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -761,6 +767,8 @@ func appGetNotification(w http.ResponseWriter, r *http.Request) {
 }
 
 func getChairStats(ctx context.Context, tx *sqlx.Tx, chairID string) (appGetNotificationResponseChairStats, error) {
+	ctx, span := tracer.Start(ctx, "getChairStats")
+	defer span.End()
 	stats := appGetNotificationResponseChairStats{}
 
 	rides := []Ride{}
@@ -774,6 +782,7 @@ func getChairStats(ctx context.Context, tx *sqlx.Tx, chairID string) (appGetNoti
 		return stats, err
 	}
 
+	span.SetAttributes(attribute.Int("isuride.rides.count", len(rides)))
 	totalRideCount := 0
 	totalEvaluation := 0.0
 	for _, ride := range rides {
@@ -864,7 +873,7 @@ func appGetNearbyChairs(w http.ResponseWriter, r *http.Request) {
 
 	coordinate := Coordinate{Latitude: lat, Longitude: lon}
 
-	tx, err := db.Beginx()
+	tx, err := db.BeginTxx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -882,6 +891,8 @@ func appGetNearbyChairs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	loopCtx, loopSpan := tracer.Start(ctx, "appGetNearbyChairs.scanChairs", trace.WithAttributes(attribute.Int("isuride.chairs.count", len(chairs))))
+	defer loopSpan.End()
 	nearbyChairs := []appGetNearbyChairsResponseChair{}
 	for _, chair := range chairs {
 		if !chair.IsActive {
@@ -889,7 +900,7 @@ func appGetNearbyChairs(w http.ResponseWriter, r *http.Request) {
 		}
 
 		rides := []*Ride{}
-		if err := tx.SelectContext(ctx, &rides, `SELECT * FROM rides WHERE chair_id = ? ORDER BY created_at DESC`, chair.ID); err != nil {
+		if err := tx.SelectContext(loopCtx, &rides, `SELECT * FROM rides WHERE chair_id = ? ORDER BY created_at DESC`, chair.ID); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -897,7 +908,7 @@ func appGetNearbyChairs(w http.ResponseWriter, r *http.Request) {
 		skip := false
 		for _, ride := range rides {
 			// 過去にライドが存在し、かつ、それが完了していない場合はスキップ
-			status, err := getLatestRideStatus(ctx, tx, ride.ID)
+			status, err := getLatestRideStatus(loopCtx, tx, ride.ID)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err)
 				return
@@ -914,7 +925,7 @@ func appGetNearbyChairs(w http.ResponseWriter, r *http.Request) {
 		// 最新の位置情報を取得
 		chairLocation := &ChairLocation{}
 		err = tx.GetContext(
-			ctx,
+			loopCtx,
 			chairLocation,
 			`SELECT * FROM chair_locations WHERE chair_id = ? ORDER BY created_at DESC LIMIT 1`,
 			chair.ID,
@@ -940,6 +951,7 @@ func appGetNearbyChairs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	loopSpan.End()
 	retrievedAt := &time.Time{}
 	err = tx.GetContext(
 		ctx,

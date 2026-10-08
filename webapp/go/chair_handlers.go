@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -104,7 +105,7 @@ func chairPostCoordinate(w http.ResponseWriter, r *http.Request) {
 
 	chair := ctx.Value("chair").(*Chair)
 
-	tx, err := db.Beginx()
+	tx, err := db.BeginTxx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -188,7 +189,7 @@ func chairGetNotification(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chair := ctx.Value("chair").(*Chair)
 
-	tx, err := db.Beginx()
+	tx, err := db.BeginTxx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -281,7 +282,7 @@ func chairPostRideStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := db.Beginx()
+	tx, err := db.BeginTxx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

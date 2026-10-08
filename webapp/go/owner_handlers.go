@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -8,6 +9,9 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -102,7 +106,7 @@ func ownerGetSales(w http.ResponseWriter, r *http.Request) {
 
 	owner := r.Context().Value("owner").(*Owner)
 
-	tx, err := db.Beginx()
+	tx, err := db.BeginTxx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -119,10 +123,12 @@ func ownerGetSales(w http.ResponseWriter, r *http.Request) {
 		TotalSales: 0,
 	}
 
+	loopCtx, loopSpan := tracer.Start(ctx, "ownerGetSales.sumByChair", trace.WithAttributes(attribute.Int("isuride.chairs.count", len(chairs))))
+	defer loopSpan.End()
 	modelSalesByModel := map[string]int{}
 	for _, chair := range chairs {
 		rides := []Ride{}
-		if err := tx.SelectContext(ctx, &rides, "SELECT rides.* FROM rides JOIN ride_statuses ON rides.id = ride_statuses.ride_id WHERE chair_id = ? AND status = 'COMPLETED' AND updated_at BETWEEN ? AND ? + INTERVAL 999 MICROSECOND", chair.ID, since, until); err != nil {
+		if err := tx.SelectContext(loopCtx, &rides, "SELECT rides.* FROM rides JOIN ride_statuses ON rides.id = ride_statuses.ride_id WHERE chair_id = ? AND status = 'COMPLETED' AND updated_at BETWEEN ? AND ? + INTERVAL 999 MICROSECOND", chair.ID, since, until); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -139,6 +145,7 @@ func ownerGetSales(w http.ResponseWriter, r *http.Request) {
 		modelSalesByModel[chair.Model] += sales
 	}
 
+	loopSpan.End()
 	models := []modelSales{}
 	for model, sales := range modelSalesByModel {
 		models = append(models, modelSales{

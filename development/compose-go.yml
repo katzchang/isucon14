@@ -28,6 +28,20 @@ services:
         condition: service_healthy
     environment:
       ISUCON_DB_HOST: db
+      # OTel: ホスト上の Splunk Observability Studio (obstudio) の OTLP/HTTP へ送る
+      OTEL_SERVICE_NAME: isuride
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=local-orbstack
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://host.docker.internal:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      # アプリログはローカルの obstudio だけに送る (クラウドへは送らない)
+      OTEL_LOGS_EXPORTER: ${OTEL_LOGS_EXPORTER:-otlp}
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: http://host.docker.internal:4318/v1/logs
+      # 既定のキュー(2048)ではベンチ中にスパンが溢れて親スパンが落ちるため拡張
+      OTEL_BSP_MAX_QUEUE_SIZE: "65536"
+      OTEL_BSP_MAX_EXPORT_BATCH_SIZE: "4096"
+      OTEL_BSP_SCHEDULE_DELAY: "1000"
     # webapp→db も本番はループバック。nginx と同じ理由
     sysctls:
       net.ipv4.tcp_tw_reuse: 1

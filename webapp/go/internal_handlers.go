@@ -1,10 +1,29 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
+
+// recordMatching はマッチング 1 回の結果をサーバースパンとメトリクスに記録する
+func recordMatching(ctx context.Context, outcome string, attempts int) {
+	trace.SpanFromContext(ctx).SetAttributes(
+		attribute.String("isuride.matching.outcome", outcome),
+		attribute.Int("isuride.matching.attempts", attempts),
+	)
+	if matchingOutcomes != nil {
+		matchingOutcomes.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
+	}
+	if matchingAttempts != nil && attempts > 0 {
+		matchingAttempts.Record(ctx, int64(attempts))
+	}
+}
 
 // このAPIをインスタンス内から一定間隔で叩かせることで、椅子とライドをマッチングさせる
 func internalGetMatching(w http.ResponseWriter, r *http.Request) {
@@ -13,16 +32,20 @@ func internalGetMatching(w http.ResponseWriter, r *http.Request) {
 	ride := &Ride{}
 	if err := db.GetContext(ctx, ride, `SELECT * FROM rides WHERE chair_id IS NULL ORDER BY created_at LIMIT 1`); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			recordMatching(ctx, "no_waiting_ride", 0)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		recordMatching(ctx, "error", 0)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	matched := &Chair{}
 	empty := false
+	attempts := 0
 	for i := 0; i < 10; i++ {
+		attempts++
 		if err := db.GetContext(ctx, matched, "SELECT * FROM chairs INNER JOIN (SELECT id FROM chairs WHERE is_active = TRUE ORDER BY RAND() LIMIT 1) AS tmp ON chairs.id = tmp.id LIMIT 1"); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				w.WriteHeader(http.StatusNoContent)
@@ -32,6 +55,7 @@ func internalGetMatching(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := db.GetContext(ctx, &empty, "SELECT COUNT(*) = 0 FROM (SELECT COUNT(chair_sent_at) = 6 AS completed FROM ride_statuses WHERE ride_id IN (SELECT id FROM rides WHERE chair_id = ?) GROUP BY ride_id) is_completed WHERE completed = FALSE", matched.ID); err != nil {
+			recordMatching(ctx, "error", attempts)
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -40,14 +64,17 @@ func internalGetMatching(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !empty {
+		recordMatching(ctx, "no_free_chair", attempts)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
 	if _, err := db.ExecContext(ctx, "UPDATE rides SET chair_id = ? WHERE id = ?", matched.ID, ride.ID); err != nil {
+		recordMatching(ctx, "error", attempts)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	recordMatching(ctx, "matched", attempts)
 
 	w.WriteHeader(http.StatusNoContent)
 }

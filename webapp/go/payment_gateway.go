@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var erroredUpstream = errors.New("errored upstream")
@@ -39,7 +42,7 @@ func requestPaymentGatewayPostPayment(ctx context.Context, paymentGatewayURL str
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", "Bearer "+token)
 
-			res, err := http.DefaultClient.Do(req)
+			res, err := paymentHTTPClient.Do(req)
 			if err != nil {
 				return err
 			}
@@ -53,7 +56,7 @@ func requestPaymentGatewayPostPayment(ctx context.Context, paymentGatewayURL str
 				}
 				getReq.Header.Set("Authorization", "Bearer "+token)
 
-				getRes, err := http.DefaultClient.Do(getReq)
+				getRes, err := paymentHTTPClient.Do(getReq)
 				if err != nil {
 					return err
 				}
@@ -84,6 +87,10 @@ func requestPaymentGatewayPostPayment(ctx context.Context, paymentGatewayURL str
 		if err != nil {
 			if retry < 5 {
 				retry++
+				trace.SpanFromContext(ctx).AddEvent("payment.retry", trace.WithAttributes(
+					attribute.Int("http.request.resend_count", retry),
+					attribute.String("error.type", fmt.Sprintf("%T", err)),
+				))
 				time.Sleep(100 * time.Millisecond)
 				continue
 			} else {
